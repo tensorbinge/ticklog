@@ -1,0 +1,24 @@
+# Fetched third-party sources
+cpp/quill/build/
+cpp/quill/quill/
+cpp/nanolog/build/
+cpp/nanolog/NanoLog/
+
+# Go build output
+go/vendor/
+bin/
+
+# Benchmark outputs
+results/
+
+# Build artifacts
+*.o
+*.d
+calibrate
+target/
+
+# NanoLog build-local python shim
+.pyshim/
+
+# Python cache
+__pycache__/

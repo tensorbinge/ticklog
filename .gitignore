@@ -1,0 +1,23 @@
+# Rust build output
+/target
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# cargo install outputs
+.cargo/
+
+# Miri cache
+.cache/
+
+# Example output
+/logs
