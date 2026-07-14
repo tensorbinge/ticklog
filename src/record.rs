@@ -73,8 +73,8 @@ pub(crate) const FLAG_COMPLEX: u16 = 0x10;
 pub(crate) const MAX_RECORD_SIZE: usize = u16::MAX as usize;
 
 /// Assembles a record by writing the fixed sections (header, format, source)
-/// directly into `scratch`'s spare capacity, then delegating argument encoding
-/// to the caller's monomorphized closure.
+/// into `dst`, then delegating argument encoding to the caller's
+/// monomorphized closure.
 ///
 /// The closure receives a mutable slice starting right after the count byte,
 /// sized to fit exactly `args_bytes + n_args` bytes (tags + payloads). It is
@@ -84,8 +84,9 @@ pub(crate) const MAX_RECORD_SIZE: usize = u16::MAX as usize;
 ///
 /// # Safety
 ///
-/// The caller must guarantee that `write_args` writes exactly
-/// `n_args` tag bytes followed by `args_bytes` payload bytes.
+/// `dst` must point to a writable region of at least `total_size` bytes. The
+/// caller must guarantee that `write_args` writes exactly `n_args` tag bytes
+/// followed by `args_bytes` payload bytes.
 // The record fields (header, source location, arg count/size, and the arg-
 // writing closure) are genuinely distinct inputs to this monomorphized hot-path
 // assembler; bundling them into a struct would add indirection at the single
@@ -93,7 +94,7 @@ pub(crate) const MAX_RECORD_SIZE: usize = u16::MAX as usize;
 #[allow(clippy::too_many_arguments)]
 #[inline]
 pub(crate) fn assemble(
-    scratch: &mut Vec<u8>,
+    dst: *mut u8,
     level: Level,
     timestamp: u64,
     fmt: &'static str,
@@ -111,19 +112,13 @@ pub(crate) fn assemble(
     debug_assert!(fmt.len() <= u16::MAX as usize);
     debug_assert!(file.len() <= u16::MAX as usize);
 
-    scratch.clear();
-    scratch.reserve(total_size);
-
-    // SAFETY: `reserve(total_size)` guarantees the allocation holds at least
-    // `total_size` spare bytes, and `clear()` set `len == 0`, so `base` is the
-    // start of that reserved region and `buf` spans only it. Every one of the
-    // `total_size` bytes is written by the `put!` header/section stores and the
-    // caller's `write_args` closure before `set_len(total_size)`, so no
-    // uninitialized byte is ever exposed as initialized. The caller's documented
-    // contract guarantees `write_args` fills exactly the tags + payloads region.
+    // SAFETY: The caller guarantees `dst` points to `total_size` writable
+    // bytes. Every one of those bytes is written by the `put!`
+    // header/section stores and the caller's `write_args` closure, so no
+    // uninitialized byte is ever read. The caller's documented contract
+    // guarantees `write_args` fills exactly the tags + payloads region.
     unsafe {
-        let base = scratch.as_mut_ptr().add(scratch.len());
-        let buf = std::slice::from_raw_parts_mut(base, total_size);
+        let buf = std::slice::from_raw_parts_mut(dst, total_size);
         let mut pos = 0usize;
 
         // Writes `$bytes` (a little-endian `[u8; N]`) at `pos` and advances by
@@ -159,8 +154,6 @@ pub(crate) fn assemble(
 
         // Delegate to the monomorphized closure for tags + payloads.
         write_args(&mut buf[pos..]);
-
-        scratch.set_len(total_size);
     }
 }
 
@@ -199,8 +192,10 @@ mod tests {
         }
 
         let n_args = args.len() as u8;
+        scratch.clear();
+        scratch.reserve(total_size);
         assemble(
-            scratch,
+            scratch.as_mut_ptr(),
             level,
             timestamp,
             fmt,
@@ -221,6 +216,7 @@ mod tests {
                 }
             },
         );
+        unsafe { scratch.set_len(total_size) };
         true
     }
 

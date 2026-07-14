@@ -67,18 +67,20 @@ pub fn dispatch(
     let timestamp = timestamp::raw_timestamp();
     let policy = builder::backpressure();
     with_thread_buf(|tb| {
-        record::assemble(
-            &mut tb.scratch,
-            level,
-            timestamp,
-            fmt,
-            file,
-            line,
-            n_args,
-            total_size,
-            write_args,
-        );
-        tb.ring.write_record(&tb.scratch, policy);
+        if let Some(slot) = tb.ring.reserve(total_size, policy) {
+            record::assemble(
+                slot.ptr,
+                level,
+                timestamp,
+                fmt,
+                file,
+                line,
+                n_args,
+                total_size,
+                write_args,
+            );
+            tb.ring.publish(slot);
+        }
     });
 }
 
