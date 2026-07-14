@@ -36,12 +36,6 @@ name = "message_types"
 harness = false
 name = "end_to_end"
 
-# Temporary: scratch copy overhead measurement
-[[bench]]
-harness = false
-name = "scratch_overhead"
-path = "benches/opt/scratch_overhead.rs"
-
 # Latency comparison
 
 [[bench]]
