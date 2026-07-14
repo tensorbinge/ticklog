@@ -6,12 +6,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crate::builder::Backpressure;
 use crate::record::{END_OF_BUFFER, MAX_RECORD_SIZE, VERSION};
 
-/// Slot size in bytes. Records are placed at slot-aligned positions so
-/// adjacent records never share a data cache line.
+/// Cache-line size in bytes.
 ///
 /// Apple Silicon (M1/M2/M3/M4) uses 128-byte cache lines on P-cores.
 /// Intel, AMD, and standard ARM64 use 64-byte cache lines.
-pub(crate) const SLOT_SIZE: usize = {
+const CACHE_LINE_SIZE: usize = {
     #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     {
         128
@@ -21,6 +20,13 @@ pub(crate) const SLOT_SIZE: usize = {
         64
     }
 };
+
+const ATOMIC_U64_SIZE: usize = std::mem::size_of::<AtomicU64>();
+const UNSAFE_CELL_U64_SIZE: usize = std::mem::size_of::<UnsafeCell<u64>>();
+
+/// Slot size in bytes. Records are placed at slot-aligned positions so
+/// adjacent records never share a data cache line.
+pub(crate) const SLOT_SIZE: usize = CACHE_LINE_SIZE;
 
 /// Ring buffer capacity in bytes. Power of 2 for bitmask indexing.
 pub(crate) const RING_SIZE: usize = 1_048_576; // 1 MB
@@ -39,19 +45,27 @@ pub(crate) const fn align_up(n: u64, align: u64) -> u64 {
 /// reads `head` (Acquire), processes records, and advances `tail` (Release).
 /// Control fields are split across two cache lines so the producer and drain
 /// never contend for the same line on the hot path.
-#[repr(C, align(64))]
+#[repr(C)]
+#[cfg_attr(
+    all(target_arch = "aarch64", target_vendor = "apple"),
+    repr(align(128))
+)]
+#[cfg_attr(
+    not(all(target_arch = "aarch64", target_vendor = "apple")),
+    repr(align(64))
+)]
 pub(crate) struct RingBuffer {
-    // Producer cache line: offsets 0..63
+    // Producer cache line: offsets 0..CACHE_LINE-1
     /// Monotonic write position. Producer stores with Release; drain loads
     /// with Acquire.
     pub(crate) head: AtomicU64,
     /// Producer's local copy of the drain's tail. Cached to avoid reading
     /// the drain's cache line on every record.
     pub(crate) tail_cache: UnsafeCell<u64>,
-    /// Fills the producer cache line to 64 bytes.
-    _pad_p: [u8; 48],
+    /// Fills the producer cache line.
+    _pad_p: [u8; CACHE_LINE_SIZE - ATOMIC_U64_SIZE - UNSAFE_CELL_U64_SIZE],
 
-    // Drain cache line: offsets 64..127
+    // Drain cache line
     /// Monotonic read position. Drain stores with Release; producer loads
     /// with Acquire during capacity checks. The Release/Acquire pair keeps the
     /// producer from overwriting a wrapped slot the drain is still reading.
@@ -59,8 +73,8 @@ pub(crate) struct RingBuffer {
     /// Drain's local copy of the producer's head. Cached to detect new
     /// records without a redundant atomic load.
     pub(crate) head_cache: UnsafeCell<u64>,
-    /// Fills the drain cache line to 128 bytes.
-    _pad_d: [u8; 48],
+    /// Fills the drain cache line.
+    _pad_d: [u8; CACHE_LINE_SIZE - ATOMIC_U64_SIZE - UNSAFE_CELL_U64_SIZE],
 
     /// Set to `false` by the producer on thread exit. The drain reads with
     /// Acquire to detect dead rings whose remaining records have been
@@ -106,10 +120,10 @@ impl RingBuffer {
         Self {
             head: AtomicU64::new(0),
             tail_cache: UnsafeCell::new(0),
-            _pad_p: [0u8; 48],
+            _pad_p: [0u8; CACHE_LINE_SIZE - ATOMIC_U64_SIZE - UNSAFE_CELL_U64_SIZE],
             tail: AtomicU64::new(0),
             head_cache: UnsafeCell::new(0),
-            _pad_d: [0u8; 48],
+            _pad_d: [0u8; CACHE_LINE_SIZE - ATOMIC_U64_SIZE - UNSAFE_CELL_U64_SIZE],
             live: AtomicBool::new(true),
             data,
         }
@@ -266,14 +280,14 @@ mod tests {
     }
 
     #[test]
-    fn struct_alignment_is_64() {
-        assert_eq!(mem::align_of::<RingBuffer>(), 64);
+    fn struct_alignment_matches_cache_line() {
+        assert_eq!(mem::align_of::<RingBuffer>(), CACHE_LINE_SIZE);
     }
 
     #[test]
     fn struct_size_is_multiple_of_alignment() {
         let size = mem::size_of::<RingBuffer>();
-        assert_eq!(size % 64, 0);
+        assert_eq!(size % CACHE_LINE_SIZE, 0);
     }
 
     #[test]
@@ -285,11 +299,11 @@ mod tests {
     }
 
     #[test]
-    fn tail_at_offset_64() {
+    fn tail_at_cache_line_offset() {
         let rb = RingBuffer::new();
         let base = &rb as *const RingBuffer as usize;
         let tail_addr = &rb.tail as *const AtomicU64 as usize;
-        assert_eq!(tail_addr - base, 64);
+        assert_eq!(tail_addr - base, CACHE_LINE_SIZE);
     }
 
     #[test]
@@ -298,7 +312,7 @@ mod tests {
         let head_addr = &rb.head as *const AtomicU64 as usize;
         let tail_addr = &rb.tail as *const AtomicU64 as usize;
         let diff = head_addr.abs_diff(tail_addr);
-        assert!(diff >= 64);
+        assert!(diff >= CACHE_LINE_SIZE);
     }
 
     #[test]
@@ -341,8 +355,7 @@ mod tests {
     fn new_zero_initializes_data_region() {
         let rb = RingBuffer::new();
         // SAFETY: single-threaded test; no concurrent writer aliases the ring.
-        let data =
-            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
         assert_eq!(data.len(), RING_SIZE);
         assert!(data.iter().all(|&b| b == 0));
     }
@@ -457,8 +470,7 @@ mod tests {
         assert_eq!(rb.head.load(Ordering::Relaxed), aligned);
 
         // The bytes landed at offset 0.
-        let data =
-            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
         assert_eq!(&data[..40], &record[..]);
     }
 
@@ -481,8 +493,7 @@ mod tests {
         // Head advanced past the EOB filler (one slot) and the record.
         assert_eq!(rb.head.load(Ordering::Relaxed), start + slot + aligned);
 
-        let data =
-            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
         // EOB header sits at the old offset and spans exactly one slot.
         let eob = (start & (RING_SIZE as u64 - 1)) as usize;
         assert_eq!(data[eob], VERSION);
@@ -531,8 +542,7 @@ mod tests {
 
         let aligned = align_up(40, SLOT_SIZE as u64);
         assert_eq!(rb.head.load(Ordering::Relaxed), RING_SIZE as u64 + aligned);
-        let data =
-            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
         assert_eq!(&data[..40], &record[..]);
     }
 }
