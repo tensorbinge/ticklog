@@ -1,7 +1,7 @@
 // Cross-language benchmark harness for NanoLog (C++).
 //
 // Self-measures call-site latency using the same hardware counter as
-// every other candidate (RDTSC on amd64, CNTVCT_EL0 on arm64). Accepts
+// every other candidate (RDTSC on x86_64, CNTVCT_EL0 on arm64). Accepts
 // --ns-per-tick from the pre-calibration step and writes per-configuration
 // percentiles plus throughput as JSON to --output.
 //

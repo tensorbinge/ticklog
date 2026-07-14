@@ -1,7 +1,7 @@
 // Cross-language benchmark harness for Quill (C++).
 //
 // Self-measures call-site latency using the same hardware counter as
-// every other candidate (RDTSC on amd64, CNTVCT_EL0 on arm64). Accepts
+// every other candidate (RDTSC on x86_64, CNTVCT_EL0 on arm64). Accepts
 // --ns-per-tick from the pre-calibration step and writes per-configuration
 // percentiles plus throughput as JSON to --output.
 //
@@ -273,7 +273,7 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
 // be correct when a binary is linked against a different SDK than the C
 // calibrate binary.
 //
-// On amd64 CNTFRQ_EL0 is not available; --ns-per-tick from calibrate.c
+// On x86_64 CNTFRQ_EL0 is not available; --ns-per-tick from calibrate.c
 // is required.
 static double resolve_ns_per_tick(double flag_val) {
     uint64_t freq = read_cntfrq();
@@ -290,7 +290,7 @@ static double resolve_ns_per_tick(double flag_val) {
         return nspt;
     }
 
-    // amd64 (or arm64 without CNTFRQ_EL0): require the flag.
+    // x86_64 (or arm64 without CNTFRQ_EL0): require the flag.
     if (flag_val <= 0.0) {
         std::fprintf(stderr, "error: --ns-per-tick is required and must be positive\n");
         std::fprintf(stderr, "usage: quill_harness --ns-per-tick <float> --output <path.json>\n");
