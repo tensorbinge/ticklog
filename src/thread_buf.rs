@@ -11,17 +11,10 @@ use std::thread;
 use crate::error::TicklogError;
 use crate::ring::RingBuffer;
 
-/// Initial capacity of a [`ThreadBuf`]'s scratch buffer. Allocated once when a
-/// thread is warmed up and sized to hold essentially every record without ever
-/// reallocating; an unusually large record grows it once and it stays grown.
-const INITIAL_SCRATCH: usize = 4096;
-
 /// A thread's local ring buffer and cached metadata.
 ///
 /// Cached values (`thread_id`, `thread_name`) are set once at creation and
-/// never change. The ring is shared with the drain thread via [`Arc`]. The
-/// `scratch` buffer is reused across log calls so record assembly allocates
-/// only when a record is larger than any seen before.
+/// never change. The ring is shared with the drain thread via [`Arc`].
 pub(crate) struct ThreadBuf {
     /// The ring buffer this thread writes records into.
     pub(crate) ring: Arc<RingBuffer>,
@@ -31,9 +24,6 @@ pub(crate) struct ThreadBuf {
     /// Cached thread name, if set.
     #[allow(unused)]
     pub(crate) thread_name: Option<String>,
-    /// Reusable buffer that a record is assembled into before being copied
-    /// into the ring. Kept per-thread to avoid a hot-path allocation.
-    pub(crate) scratch: Vec<u8>,
 }
 
 impl Drop for ThreadBuf {
@@ -146,7 +136,6 @@ where
                 ring,
                 thread_id: get_stable_thread_id(),
                 thread_name: thread::current().name().map(String::from),
-                scratch: Vec::with_capacity(INITIAL_SCRATCH),
             });
         }
 
@@ -215,7 +204,6 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 42,
             thread_name: Some("test-thread".into()),
-            scratch: Vec::new(),
         };
         assert_eq!(tb.thread_id, 42);
         assert_eq!(tb.thread_name.as_deref(), Some("test-thread"));
@@ -229,7 +217,6 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 1,
             thread_name: None,
-            scratch: Vec::new(),
         };
         assert!(ring.live.load(Ordering::Relaxed));
         drop(tb);
@@ -244,7 +231,6 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 1,
             thread_name: None,
-            scratch: Vec::new(),
         };
         drop(tb);
         // Drop set live = false on the shared RingBuffer.
@@ -292,28 +278,17 @@ mod tests {
         init_registry();
         // Models a `Loggable::encode` (or a panic hook) that logs while the
         // outer record is still being assembled: the inner call runs while the
-        // outer `&mut ThreadBuf` is live, and the outer buffer is used again
-        // afterward. On the unguarded code the inner `&mut *buf.get()` aliases
-        // the outer one -> UB (Miri flags it), and the inner call also mutates
-        // the shared scratch. With the re-entrancy guard the inner call is
-        // refused and the outer buffer is untouched by it.
-        with_thread_buf(|outer| {
-            outer.scratch.clear();
-            outer.scratch.push(0xAA);
-            // Re-entrant call on the same thread.
-            with_thread_buf(|inner| inner.scratch.push(0xBB));
-            // Use the outer borrow AFTER the nested call.
-            outer.scratch.push(0xCC);
+        // outer `&mut ThreadBuf` is live. On the unguarded code the inner
+        // `&mut *buf.get()` aliases the outer one -> UB (Miri flags it).
+        // With the re-entrancy guard the inner call is refused.
+        let outer = with_thread_buf(|_outer| {
+            // Re-entrant call on the same thread must return None.
+            with_thread_buf(|_inner| ())
         });
-
-        // The re-entrant call must not have run, so scratch holds only the
-        // outer writes.
-        with_thread_buf(|tb| {
-            assert_eq!(
-                tb.scratch,
-                vec![0xAA, 0xCC],
-                "re-entrant with_thread_buf must be refused, not run"
-            );
-        });
+        assert_eq!(
+            outer,
+            Some(None),
+            "outer must succeed, inner must be refused"
+        );
     }
 }

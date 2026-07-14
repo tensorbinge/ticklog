@@ -1392,7 +1392,10 @@ mod tests {
             std::thread::spawn(move || {
                 barrier.wait();
                 for _ in 0..N {
-                    assert!(ring.write_record(&record, Backpressure::Block));
+                    let len = record.len();
+                    let slot = ring.reserve(len, Backpressure::Block).unwrap();
+                    unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+                    ring.publish(slot);
                 }
             })
         };

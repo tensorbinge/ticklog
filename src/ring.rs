@@ -28,6 +28,14 @@ const UNSAFE_CELL_U64_SIZE: usize = std::mem::size_of::<UnsafeCell<u64>>();
 /// adjacent records never share a data cache line.
 pub(crate) const SLOT_SIZE: usize = CACHE_LINE_SIZE;
 
+/// A reserved write slot in the ring. `ptr` points to a contiguous region of
+/// at least the requested size; `head` is the value to store (with Release
+/// ordering) after the caller has written the record bytes.
+pub(crate) struct Reservation {
+    pub(crate) ptr: *mut u8,
+    pub(crate) head: u64,
+}
+
 /// Ring buffer capacity in bytes. Power of 2 for bitmask indexing.
 pub(crate) const RING_SIZE: usize = 1_048_576; // 1 MB
 
@@ -129,29 +137,31 @@ impl RingBuffer {
         }
     }
 
-    /// Writes one assembled record into the ring, handling end-of-buffer wrap
-    /// and backpressure, then publishes it to the drain.
+    /// Reserves a slot in the ring for a record of `total_size` bytes.
     ///
-    /// `record` is a fully framed `LOG_RECORD` whose length equals the u16
-    /// `total_size` in its header. Returns `true` if the record was published,
-    /// or `false` if it was dropped because the ring was full under
-    /// [`Backpressure::Drop`]. Under [`Backpressure::Block`] this spins until
-    /// space frees, so it always returns `true`.
+    /// Returns a [`Reservation`] with a write pointer and the future `head`
+    /// value, or `None` if the ring is full under [`Backpressure::Drop`].
+    /// Under [`Backpressure::Block`] this spins until space frees, so it
+    /// always returns `Some`.
+    ///
+    /// The caller writes exactly `total_size` bytes to `Reservation::ptr`,
+    /// then calls [`publish`](Self::publish). The slot is slot-aligned so
+    /// adjacent records never share a cache line.
     ///
     /// Single-producer: the calling thread is the sole writer of this ring's
     /// `head` and `tail_cache`.
     #[inline]
-    pub(crate) fn write_record(&self, record: &[u8], policy: Backpressure) -> bool {
-        // A record's length is its u16 `total_size`, which `assemble` guarantees
-        // fits. This bound also keeps `aligned <= align_up(u16::MAX) == 65536`,
-        // so the EOB `span` written on a wrap (always strictly less than
-        // `aligned`) fits a u16 without truncation.
+    pub(crate) fn reserve(
+        &self,
+        total_size: usize,
+        policy: Backpressure,
+    ) -> Option<Reservation> {
         debug_assert!(
-            record.len() <= MAX_RECORD_SIZE,
-            "invariant: record length must fit the u16 total_size field"
+            total_size <= MAX_RECORD_SIZE,
+            "invariant: total_size must fit the u16 total_size field"
         );
-        let total_size = record.len() as u64;
-        let aligned = align_up(total_size, SLOT_SIZE as u64);
+        let total = total_size as u64;
+        let aligned = align_up(total, SLOT_SIZE as u64);
 
         // The producer is the sole writer of `head`, so a Relaxed load of its
         // own position is sufficient.
@@ -171,7 +181,7 @@ impl RingBuffer {
         };
 
         if !self.ensure_capacity(head, needed, policy) {
-            return false;
+            return None;
         }
 
         // The producer reaches the buffer through a base pointer taken from the
@@ -194,20 +204,23 @@ impl RingBuffer {
 
         // The record lands at the next slot boundary: offset 0 after a wrap.
         let dst = (next & (RING_SIZE as u64 - 1)) as usize;
-        // SAFETY: `dst` starts the `aligned`-byte region reserved above; copying
-        // `record.len()` (<= aligned) bytes stays within it and within the ring.
-        // Source and destination are distinct allocations, so they never
-        // overlap.
-        unsafe {
-            std::ptr::copy_nonoverlapping(record.as_ptr(), base.add(dst), record.len());
-        }
-        next = next.wrapping_add(aligned);
+        let new_head = next.wrapping_add(aligned);
 
-        // Publish. Release pairs with the drain's Acquire load of `head`, so
-        // every byte written above is visible before the drain sees the new
-        // head and reads the region.
-        self.head.store(next, Ordering::Release);
-        true
+        Some(Reservation {
+            // SAFETY: `dst` starts the `aligned`-byte region reserved above;
+            // the caller writes `total_size` bytes, which is <= aligned, so the
+            // write stays within the ring.
+            ptr: unsafe { base.add(dst) },
+            head: new_head,
+        })
+    }
+
+    /// Publishes a reserved slot to the drain. Release pairs with the drain's
+    /// Acquire load of `head`, so every byte written to `r.ptr` is visible
+    /// before the drain sees the new head and reads the region.
+    #[inline(always)]
+    pub(crate) fn publish(&self, r: Reservation) {
+        self.head.store(r.head, Ordering::Release);
     }
 
     /// Ensures `[head, head + needed)` is free for the producer to write,
@@ -463,7 +476,10 @@ mod tests {
     fn write_record_places_record_and_advances_head() {
         let rb = RingBuffer::new();
         let record = vec![0xABu8; 40];
-        assert!(rb.write_record(&record, Backpressure::Drop));
+        let len = record.len();
+        let slot = rb.reserve(len, Backpressure::Drop).unwrap();
+        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+        rb.publish(slot);
 
         // Head advances by the slot-aligned record size.
         let aligned = align_up(40, SLOT_SIZE as u64);
@@ -488,7 +504,10 @@ mod tests {
         // wrap: an EOB fills the last slot and the record lands at offset 0.
         let record = vec![0xCDu8; slot as usize + 1];
         let aligned = align_up(record.len() as u64, slot); // == 2 * slot
-        assert!(rb.write_record(&record, Backpressure::Drop));
+        let len = record.len();
+        let res = rb.reserve(len, Backpressure::Drop).unwrap();
+        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), res.ptr, len); }
+        rb.publish(res);
 
         // Head advanced past the EOB filler (one slot) and the record.
         assert_eq!(rb.head.load(Ordering::Relaxed), start + slot + aligned);
@@ -515,7 +534,7 @@ mod tests {
         unsafe { *rb.tail_cache.get() = 0 };
 
         let record = vec![0u8; 40];
-        assert!(!rb.write_record(&record, Backpressure::Drop));
+        assert!(rb.reserve(record.len(), Backpressure::Drop).is_none());
         // Head is unchanged: nothing was written.
         assert_eq!(rb.head.load(Ordering::Relaxed), RING_SIZE as u64);
     }
@@ -537,7 +556,10 @@ mod tests {
 
         let record = vec![0x5Au8; 40];
         // Blocks until the drain thread frees space, then writes.
-        assert!(rb.write_record(&record, Backpressure::Block));
+        let len = record.len();
+        let slot = rb.reserve(len, Backpressure::Block).unwrap();
+        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+        rb.publish(slot);
         handle.join().unwrap();
 
         let aligned = align_up(40, SLOT_SIZE as u64);
