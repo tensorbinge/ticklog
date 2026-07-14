@@ -6,7 +6,7 @@ Log calls run exclusively on the calling thread's hot path: check the level, enc
 
 ## Features
 
-- **Nanosecond hot path:** ~10 ns per call, over 20x faster than general-purpose loggers (see [Benchmarks](#benchmarks)), with no per-call allocation, formatting, or I/O on the calling thread, so the cost stays small and predictable on latency-critical paths.
+- **Nanosecond hot path:** 5–7 ns per call, over 30x faster than general-purpose loggers (see [Benchmarks](#benchmarks)), with no per-call allocation, formatting, or I/O on the calling thread, so the cost stays small and predictable on latency-critical paths.
 - **Console/file sinks + Fanout:** stdout or stderr (colored by level) and buffered files, with fan-out from one record to several sinks and per-sink level filtering.
 - **Ecosystem support:** file rotation, compression, and retention come from existing crates like [logroller](https://crates.io/crates/logroller) and [tracing-appender](https://crates.io/crates/tracing-appender) (see [Examples](examples/sinks/)); anything that implements `io::Write` plugs in as a sink.
 - **Zero dependencies:** no runtime dependencies; a minimal, self-contained crate.
@@ -41,7 +41,7 @@ Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile). Lower is
 
 | Logger      | info!("x={}", 42u64) | info!("{}", "hello world") | info!("{} {} {}", 42u64, 3.14159, "hello world") |
 | ----------- | -------------------: | -------------------------: | -----------------------------------------------: |
-| **ticklog** |           **8.0 ns** |                 **9.7 ns** |                                      **11.6 ns** |
+| **ticklog** |           **5.2 ns** |                 **5.9 ns** |                                       **7.0 ns** |
 | env_logger  |               231 ns |                     232 ns |                                           307 ns |
 | slog        |               274 ns |                     269 ns |                                           454 ns |
 | tracing     |               386 ns |                     425 ns |                                           458 ns |
