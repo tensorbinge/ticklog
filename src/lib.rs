@@ -15,15 +15,31 @@
 //!
 //! # Benchmarks
 //!
-//! Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile).
-//! Each measurement is the median of 200 criterion samples. Lower is better.
+//! Per-call latency (p50, criterion). Lower is better.
 //!
-//! | Logger | info!("x={}", 42u64) | info!("{}", "hello world") | info!("{} {} {}", 42u64, 3.14159, "hello world") |
-//! |--------|----------:|----------:|--------:|
-//! | **ticklog** | **5.2 ns** | **5.9 ns** | **7.0 ns** |
-//! | env_logger | 231 ns | 232 ns | 307 ns |
-//! | slog | 274 ns | 269 ns | 454 ns |
-//! | tracing | 386 ns | 425 ns | 458 ns |
+//! | Name    | Log call                                           |
+//! | ------- | -------------------------------------------------- |
+//! | one_u64 | `info!("x={}", 42u64)`                             |
+//! | one_str | `info!("{}", "hello world")`                       |
+//! | mixed   | `info!("{} {} {}", 42u64, 3.14159, "hello world")` |
+//!
+//! **Mac M4** (Apple M4, 4.4 GHz, macOS 15):
+//!
+//! | Logger      | one_u64 | one_str |  mixed |
+//! | ----------- | ------: | ------: | -----: |
+//! | **ticklog** | 5.2 ns  | 5.9 ns  | 7.0 ns |
+//! | env_logger  |  231 ns |  232 ns | 307 ns |
+//! | slog        |  274 ns |  269 ns | 454 ns |
+//! | tracing     |  386 ns |  425 ns | 458 ns |
+//!
+//! **Granite Rapids** (Intel Xeon 6982P-C, 3.9 GHz, Ubuntu 24.04):
+//!
+//! | Logger      | one_u64 | one_str |  mixed |
+//! | ----------- | ------: | ------: | -----: |
+//! | **ticklog** | 8.6 ns  | 8.4 ns  | 9.9 ns |
+//! | env_logger  |  370 ns |  371 ns | 491 ns |
+//! | slog        |  499 ns |  453 ns | 686 ns |
+//! | tracing     |  837 ns |  854 ns | 937 ns |
 //!
 //! # Quick start
 //!
