@@ -2,7 +2,7 @@
 
 A fast, minimal logging library for latency-critical Rust applications, such as high-frequency trading, where the cost of a log call on the hot path must stay in the low tens of nanoseconds.
 
-Log calls run exclusively on the calling thread's hot path: check the level, encode a compact binary record into that thread's private lock-free buffer, and return. A background drain thread does the rest: decoding, formatting, timestamping, and writing each record, keeping all of that cost off the calling thread.
+How it works: Log calls run exclusively on the calling thread's hot path: check the level, encode a compact binary record into that thread's private lock-free buffer, and return. A background drain thread does the rest: decoding, formatting, timestamping, and writing each record, keeping all of that cost off the calling thread.
 
 ## Features
 
@@ -87,13 +87,13 @@ Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --cpu <n> --drain-cpu 
 
 `ticklog::configure!` accepts these keys, each optional:
 
-| Key               | Purpose                                                                         | Default                 |
-| ----------------- | ------------------------------------------------------------------------------- | ----------------------- |
-| `sink`            | Where output goes.                                                              | `ConsoleSink` on stderr |
-| `max_level`       | Records above this level are dropped on the calling thread before any encoding. | `Level::Info`           |
-| `backpressure`    | What a logging thread does when its buffer is full.                             | `Backpressure::Drop`    |
-| `timezone_offset` | Seconds east of UTC, applied to timestamp formatting only.                      | `0` (UTC)               |
-| `drain_affinity`  | Pin the background thread to a set of logical CPUs.                             | none                    |
+| Key             | Purpose                                                                         | Default               |
+| --------------- | ------------------------------------------------------------------------------- | --------------------- |
+| sink            | Where output goes.                                                              | ConsoleSink on stderr |
+| max_level       | Records above this level are dropped on the calling thread before any encoding. | Level::Info           |
+| backpressure    | What a logging thread does when its buffer is full.                             | Backpressure::Drop    |
+| timezone_offset | Seconds east of UTC, applied to timestamp formatting only.                      | 0 (UTC)               |
+| drain_affinity  | Pin the background thread to a set of logical CPUs.                             | none                  |
 
 Example with every key:
 
