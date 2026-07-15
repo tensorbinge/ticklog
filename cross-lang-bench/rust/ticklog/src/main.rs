@@ -414,11 +414,13 @@ fn main() {
 
     // Init ticklog once with a null sink. The Guard is intentionally
     // leaked so the drain runs for the lifetime of the process.
-    let mut builder = ticklog::builder().sink(NullSink).max_level(Level::Trace);
-    if let Some(core) = cfg.backend_core {
-        builder = builder.drain_affinity(&[core]);
+    let drain_affinity = cfg.backend_core.map(|c| vec![c]);
+    let guard = ticklog::configure! {
+        sink: NullSink,
+        max_level: Level::Trace,
+        drain_affinity: drain_affinity,
     }
-    let guard = builder.build().expect("ticklog build");
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     let mut results = Vec::new();

@@ -29,11 +29,11 @@ fn max_level_error_admits_only_error_records() {
         calls: Arc::clone(&calls),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Error)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Error,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // Only `error!` is at or below the Error ceiling; the rest are dropped at
     // the macro before dispatch.

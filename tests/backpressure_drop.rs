@@ -8,7 +8,7 @@
 //! records and drops every record after it. Opening the gate then lets that
 //! prefix flush in order, which is what the assertions check.
 //!
-//! Each integration test is its own binary, so this file's single `build()`
+//! Each integration test is its own binary, so this file's single `configure!`
 //! owns the process-global registry for the whole run.
 
 use std::io;
@@ -84,12 +84,12 @@ fn drop_policy_discards_newest_records_and_never_blocks() {
         passed: false,
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Info)
-        .backpressure(Backpressure::Drop)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Info,
+        backpressure: Backpressure::Drop,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // The drain is stalled on the gate, so the ring fills and the tail never
     // advances. Under Drop this loop never blocks; if it did, the test would

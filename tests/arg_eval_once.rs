@@ -36,11 +36,11 @@ fn each_argument_is_evaluated_once_and_arity_is_unbounded() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Trace,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // A side-effecting argument: `fetch_add` returns the pre-increment value and
     // bumps the counter. Evaluated once, it returns 0 and leaves the counter at 1.

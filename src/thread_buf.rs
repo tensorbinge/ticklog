@@ -106,7 +106,7 @@ impl Drop for ActiveGuard<'_> {
 /// # Panics
 ///
 /// Panics if the [`REGISTRY`] has not been initialized by
-/// [`Builder::build`].
+/// [`configure!`].
 pub(crate) fn with_thread_buf<F, R>(f: F) -> Option<R>
 where
     F: FnOnce(&mut ThreadBuf) -> R,
@@ -159,7 +159,7 @@ pub(crate) static REGISTRY: OnceLock<Mutex<Vec<Arc<RingBuffer>>>> = OnceLock::ne
 pub(crate) fn register_ring(ring: Arc<RingBuffer>) {
     let mut rings = REGISTRY
         .get()
-        .expect("invariant: ring registry not initialized; call ticklog::builder().build() before logging")
+        .expect("invariant: ring registry not initialized; call ticklog::configure! before logging")
         .lock()
         .expect("invariant: ring registry mutex poisoned by a panic in another thread");
     rings.push(ring);
@@ -174,7 +174,7 @@ pub(crate) fn register_ring(ring: Arc<RingBuffer>) {
 /// # Errors
 ///
 /// Returns [`TicklogError::NotInitialized`] if ticklog has not been
-/// initialized yet (no [`Builder::build`](crate::Builder::build) has run).
+/// initialized yet (no [`configure!`][crate::configure!] has run).
 pub fn warm_up() -> Result<(), TicklogError> {
     if REGISTRY.get().is_none() {
         return Err(TicklogError::NotInitialized);

@@ -45,11 +45,11 @@ fn fanout_routes_each_record_by_per_sink_level() {
 
     // The global ceiling admits every level, so filtering happens only in the
     // fan-out, per inner sink.
-    let guard = ticklog::builder()
-        .sink(fan)
-        .max_level(Level::Trace)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: fan,
+        max_level: Level::Trace,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     error!("e");
     warn!("w");

@@ -184,16 +184,19 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
     fn single_core_does_not_panic() {
         pin_thread(&[0]);
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
     fn multiple_cores_does_not_panic() {
         pin_thread(&[0, 1, 2, 3]);
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
     fn successive_calls_does_not_panic() {
         pin_thread(&[0]);
         pin_thread(&[1, 2]);
@@ -201,6 +204,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
     fn large_core_number_does_not_panic() {
         pin_thread(&[usize::MAX]);
     }
@@ -211,6 +215,7 @@ mod tests {
     // thread's port is unchanged across many calls.
     #[cfg(target_os = "macos")]
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: Mach port routines not available under Miri")]
     fn pin_does_not_leak_thread_port_refs() {
         use std::ffi::{c_int, c_uint};
 
@@ -261,6 +266,7 @@ mod tests {
     // error rather than being silently swallowed.
     #[cfg(target_os = "linux")]
     #[test]
+    #[cfg_attr(miri, ignore = "FFI: sched_setaffinity not available under Miri")]
     fn invalid_mask_reports_error() {
         // usize::MAX maps to no representable bit -> all-zero mask -> EINVAL.
         // SAFETY: FFI into sched_setaffinity with a valid stack-allocated mask.

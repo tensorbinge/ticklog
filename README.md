@@ -25,15 +25,15 @@ Requires Rust 1.85 or newer (edition 2024).
 ```rust
 use ticklog::{info, FileSink};
 
-let _guard = ticklog::builder()
-    .sink(FileSink::new("app.log").unwrap())
-    .build()
-    .unwrap();
+let _guard = ticklog::configure! {
+    sink: FileSink::new("app.log").unwrap(),
+}
+.unwrap();
 
 info!("listening on {}", 8080);
 ```
 
-`build()` returns a `Guard`. Keep it alive for as long as you want to log: when it is dropped it flushes the sink, stops the background thread, and disables logging, so every log call afterwards is a silent no-op.
+[`configure!`] returns a `Guard`. Keep it alive for as long as you want to log: when it is dropped it flushes the sink, stops the background thread, and disables logging, so every log call afterwards is a silent no-op.
 
 ## Benchmarks
 
@@ -48,15 +48,30 @@ Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile). Lower is
 
 ## Configuration
 
-`builder()` returns a `Builder` with these options:
+[`configure!`] accepts these keys, each optional:
 
-| Method | Purpose | Default |
-| ------ | ------- | ------- |
-| `sink(s)` | Where output goes. | `ConsoleSink` on stderr |
-| `max_level(level)` | Records above this level are dropped on the calling thread before any encoding. | `Level::Info` |
-| `backpressure(policy)` | What a logging thread does when its buffer is full. | `Backpressure::Drop` |
-| `timezone_offset(seconds)` | Seconds east of UTC, applied to timestamp formatting only. | `0` (UTC) |
-| `drain_affinity(&cores)` | Pin the background thread to a set of logical CPUs. | none |
+| Key | Purpose | Default |
+| --- | ------- | ------- |
+| `sink` | Where output goes. | `ConsoleSink` on stderr |
+| `max_level` | Records above this level are dropped on the calling thread before any encoding. | `Level::Info` |
+| `backpressure` | What a logging thread does when its buffer is full. | `Backpressure::Drop` |
+| `timezone_offset` | Seconds east of UTC, applied to timestamp formatting only. | `0` (UTC) |
+| `drain_affinity` | Pin the background thread to a set of logical CPUs. | none |
+
+Example with every key:
+
+```rust
+use ticklog::{configure, ConsoleSink, Level, Backpressure};
+
+let _guard = configure! {
+    sink: ConsoleSink::stderr(),
+    max_level: Level::Trace,
+    backpressure: Backpressure::Drop,
+    timezone_offset: 3600,
+    drain_affinity: Some(vec![0]),
+}
+.unwrap();
+```
 
 `Backpressure::Drop` discards the record and returns immediately, never blocking the caller. `Backpressure::Block` spins until space frees up: it never drops records but burns CPU while the buffer stays full.
 

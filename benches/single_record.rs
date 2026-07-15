@@ -21,11 +21,13 @@ impl LogSink for NullSink {
 fn bench_single_record(c: &mut Criterion) {
     affinity::pin_producer_from_env();
 
-    let mut builder = ticklog::builder().sink(NullSink).max_level(Level::Trace);
-    if let Some(core) = affinity::drain_core_from_env() {
-        builder = builder.drain_affinity(&[core]);
+    let drain_affinity = affinity::drain_core_from_env().map(|c| vec![c]);
+    let guard = ticklog::configure! {
+        sink: NullSink,
+        max_level: Level::Trace,
+        drain_affinity: drain_affinity,
     }
-    let guard = builder.build().expect("ticklog build");
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     c.bench_function("info_one_u64", |b| {

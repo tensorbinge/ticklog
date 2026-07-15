@@ -15,11 +15,11 @@ impl LogSink for NullSink {
 }
 
 fn bench_message_types(c: &mut Criterion) {
-    let guard = ticklog::builder()
-        .sink(NullSink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("ticklog build");
+    let guard = ticklog::configure! {
+        sink: NullSink,
+        max_level: Level::Trace,
+    }
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     let mut g = c.benchmark_group("message_types");

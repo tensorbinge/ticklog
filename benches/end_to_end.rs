@@ -27,11 +27,11 @@ fn bench_end_to_end(c: &mut Criterion) {
         delivered: Arc::clone(&delivered),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("ticklog build");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Trace,
+    }
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     const BATCH: u64 = 1_000;

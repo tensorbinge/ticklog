@@ -38,11 +38,11 @@ fn oversized_record_is_dropped_and_next_record_survives() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Trace,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // ~70 KB argument: encoded record size exceeds u16::MAX (65_535). Without
     // the drop gate this misframes the ring (or trips the debug_assert).

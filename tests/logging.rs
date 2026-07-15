@@ -1,7 +1,7 @@
 //! End-to-end: the logging macros produce formatted lines at the sink.
 //!
 //! This is an integration test (its own binary), so the process-global
-//! `REGISTRY` starts fresh and `build()` succeeds exactly once -- every
+//! `REGISTRY` starts fresh and `configure!` succeeds exactly once -- every
 //! assertion runs under a single guard.
 
 use std::sync::{Arc, Mutex};
@@ -30,11 +30,11 @@ fn macros_produce_formatted_lines_in_order() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Trace) // admit every level
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Trace,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // One producer thread (this one) writes to a single ring, so the drain
     // emits these in the order they were logged.

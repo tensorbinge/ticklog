@@ -39,11 +39,11 @@ fn worker_thread_records_survive_its_exit_and_guard_shutdown() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Info)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Info,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     info!("main before worker");
 

@@ -18,11 +18,11 @@ fn main() -> io::Result<()> {
 
     // FileSink buffers writes and truncates the file on open, so each run
     // starts with a fresh log.
-    let guard = ticklog::builder()
-        .sink(FileSink::truncate("logs/basic.log")?)
-        .max_level(Level::Info)
-        .build()
-        .expect("ticklog builds once per process");
+    let guard = ticklog::configure! {
+        sink: FileSink::truncate("logs/basic.log")?,
+        max_level: Level::Info,
+    }
+    .expect("ticklog builds once per process");
 
     info!("server listening on {}", 8080);
     warn!("retry {} of {}", 3, 10);

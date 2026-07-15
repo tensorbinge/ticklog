@@ -14,7 +14,7 @@ pub fn pin_producer_from_env() {
 }
 
 /// Drain-thread core from `TICKLOG_DRAIN_CORE`, or `None` to leave the drain
-/// unpinned. Pass the result to `Builder::drain_affinity`.
+/// unpinned. Pass the result to `configure!` as the `drain_affinity` key.
 pub fn drain_core_from_env() -> Option<usize> {
     core_from_env("TICKLOG_DRAIN_CORE")
 }
