@@ -1,6 +1,6 @@
 //! Initialization of the logging system.
 //!
-//! [`configure!`] initializes logging and returns a [`Guard`]. Logging stops
+//! [`crate::configure!`] initializes logging and returns a [`Guard`]. Logging stops
 //! when the guard is dropped.
 
 use std::sync::atomic::AtomicBool;

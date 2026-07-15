@@ -1,7 +1,7 @@
 //! [`ConsoleSink`]: writes log lines to stdout or stderr, optionally colored by
 //! level.
 //!
-//! This is the default sink installed by [`configure!`]. Colors are
+//! This is the default sink installed by [`crate::configure!`]. Colors are
 //! applied per level via ANSI SGR codes; [`ColorMode::Auto`] (the default)
 //! enables them only when the target stream is a terminal, so redirected output
 //! stays plain.

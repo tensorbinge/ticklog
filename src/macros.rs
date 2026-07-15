@@ -148,7 +148,7 @@ macro_rules! __ticklog_cons {
     };
 }
 
-/// Logs a message at [`Level::Trace`](crate::Level::Trace).
+/// Logs a message at [`Level::Trace`].
 ///
 /// Takes a format string literal and positional arguments, e.g.
 /// `trace!("state = {}", state)`. The record is discarded unless trace-level
@@ -158,7 +158,7 @@ macro_rules! trace {
     ($($arg:tt)*) => { $crate::__ticklog_log!($crate::Level::Trace, $($arg)*) };
 }
 
-/// Logs a message at [`Level::Debug`](crate::Level::Debug).
+/// Logs a message at [`Level::Debug`].
 ///
 /// Takes a format string literal and positional arguments, e.g.
 /// `debug!("value = {}", value)`.
@@ -167,7 +167,7 @@ macro_rules! debug {
     ($($arg:tt)*) => { $crate::__ticklog_log!($crate::Level::Debug, $($arg)*) };
 }
 
-/// Logs a message at [`Level::Info`](crate::Level::Info).
+/// Logs a message at [`Level::Info`].
 ///
 /// Takes a format string literal and positional arguments, e.g.
 /// `info!("listening on {}", port)`.
@@ -176,7 +176,7 @@ macro_rules! info {
     ($($arg:tt)*) => { $crate::__ticklog_log!($crate::Level::Info, $($arg)*) };
 }
 
-/// Logs a message at [`Level::Warn`](crate::Level::Warn).
+/// Logs a message at [`Level::Warn`].
 ///
 /// Takes a format string literal and positional arguments, e.g.
 /// `warn!("retry {} of {}", n, max)`.
@@ -185,7 +185,7 @@ macro_rules! warn {
     ($($arg:tt)*) => { $crate::__ticklog_log!($crate::Level::Warn, $($arg)*) };
 }
 
-/// Logs a message at [`Level::Error`](crate::Level::Error).
+/// Logs a message at [`Level::Error`].
 ///
 /// Takes a format string literal and positional arguments, e.g.
 /// `error!("connection failed: {}", err)`.

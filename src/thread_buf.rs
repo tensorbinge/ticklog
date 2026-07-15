@@ -106,7 +106,7 @@ impl Drop for ActiveGuard<'_> {
 /// # Panics
 ///
 /// Panics if the [`REGISTRY`] has not been initialized by
-/// [`configure!`].
+/// [`crate::configure!`].
 pub(crate) fn with_thread_buf<F, R>(f: F) -> Option<R>
 where
     F: FnOnce(&mut ThreadBuf) -> R,

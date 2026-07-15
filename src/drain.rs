@@ -132,7 +132,7 @@ impl Cursor {
     }
 
     /// Reads a `u16` length prefix, then returns the following
-    /// `min(len, remaining)` bytes (clamped, like [`read_bytes`]).
+    /// `min(len, remaining)` bytes (clamped, like `read_bytes`).
     #[inline(always)]
     unsafe fn read_len_prefixed(&mut self) -> (&[u8], u16) {
         // SAFETY: `read_u16` and `read_bytes` are both bounds-clamped and never

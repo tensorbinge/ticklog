@@ -84,7 +84,7 @@ pub(crate) trait Loggable: Send {
 
 mod sealed {
     /// Sealing supertrait: implemented only for the argument cons-list types in
-    /// this module, so downstream crates cannot implement [`LoggableArgs`].
+    /// this module, so downstream crates cannot implement [`super::LoggableArgs`].
     pub trait Sealed {}
     impl Sealed for () {}
     impl<H: super::Loggable, T: super::LoggableArgs> Sealed for (&H, T) {}
