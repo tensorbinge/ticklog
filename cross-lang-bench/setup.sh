@@ -49,7 +49,7 @@ echo "  done -> calibrate"
 
 echo "=== Building rust/ticklog ==="
 cd rust/ticklog
-cargo build --release 2>&1 | tail -3
+cargo build --release 2>&1
 cd "$SCRIPT_DIR"
 echo "  done -> rust/ticklog/target/release/ticklog-cross-lang-harness"
 
@@ -67,8 +67,8 @@ cd "$SCRIPT_DIR"
 
 echo "=== Building cpp/quill ==="
 cd cpp/quill
-cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
-cmake --build build 2>&1 | tail -3
+cmake -B build -DCMAKE_BUILD_TYPE=Release 2>&1
+cmake --build build 2>&1
 cd "$SCRIPT_DIR"
 echo "  done -> cpp/quill/build/quill_harness"
 
@@ -80,7 +80,7 @@ if [[ "$OS" == "Linux" ]]; then
     # Fetch NanoLog runtime if not already present.
     if [ ! -d cpp/NanoLog ]; then
         echo "  fetching NanoLog..."
-        git clone --depth 1 https://github.com/PlatformLab/NanoLog.git cpp/NanoLog 2>&1 | tail -1
+        git clone --depth 1 https://github.com/PlatformLab/NanoLog.git cpp/NanoLog 2>&1
     fi
 
     # NanoLog's runtime Makefile invokes `python` (its code-generating
@@ -99,12 +99,12 @@ if [[ "$OS" == "Linux" ]]; then
     fi
 
     echo "  building runtime (make -j$NPROC)..."
-    make -C cpp/NanoLog/runtime -j"$NPROC" 2>&1 | tail -3
+    make -C cpp/NanoLog/runtime -j"$NPROC" 2>&1
 
     cd cpp/nanolog
     cmake -B build -DCMAKE_BUILD_TYPE=Release \
-        -DNANOLOG_RUNTIME_DIR="$SCRIPT_DIR/cpp/NanoLog/runtime" 2>&1 | tail -3
-    cmake --build build 2>&1 | tail -3
+        -DNANOLOG_RUNTIME_DIR="$SCRIPT_DIR/cpp/NanoLog/runtime" 2>&1
+    cmake --build build 2>&1
     cd "$SCRIPT_DIR"
     echo "  done -> cpp/nanolog/build/nanolog_harness"
 else
