@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 name = "ticklog"
 repository = "https://github.com/tensorbinge/ticklog"
 rust-version = "1.85"
-version = "0.1.0"
+version = "0.1.1"
 
 [dev-dependencies]
 criterion = {version = "0.5", features = ["html_reports"]}
