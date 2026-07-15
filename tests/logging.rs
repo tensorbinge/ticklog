@@ -62,5 +62,7 @@ fn macros_produce_formatted_lines_in_order() {
     assert!(captured[4].ends_with("trc 3.5"));
 
     // Every line carries this test file's source location (default metadata).
-    assert!(captured[0].contains("tests/logging.rs:"));
+    // Normalise Windows backslash paths so the assertion is portable.
+    let line = captured[0].replace('\\', "/");
+    assert!(line.contains("tests/logging.rs:"));
 }
