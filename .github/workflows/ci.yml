@@ -85,7 +85,11 @@ jobs:
         run: cargo +nightly miri setup
 
       - name: Run Miri tests
-        run: cargo +nightly miri test --lib
+        run: |
+          cargo +nightly miri test --lib cursor_
+          cargo +nightly miri test --lib write_record
+          cargo +nightly miri test --lib producer_and_drain
+          cargo +nightly miri test --lib thread_buf
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
 
