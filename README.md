@@ -33,7 +33,7 @@ let _guard = ticklog::configure! {
 info!("listening on {}", 8080);
 ```
 
-[`configure!`] returns a `Guard`. Keep it alive for as long as you want to log: when it is dropped it flushes the sink, stops the background thread, and disables logging, so every log call afterwards is a silent no-op.
+`ticklog::configure!` returns a `Guard`. Keep it alive for as long as you want to log: when it is dropped it flushes the sink, stops the background thread, and disables logging, so every log call afterwards is a silent no-op.
 
 ## Benchmarks
 
@@ -48,7 +48,7 @@ Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile). Lower is
 
 ## Configuration
 
-[`configure!`] accepts these keys, each optional:
+`ticklog::configure!` accepts these keys, each optional:
 
 | Key | Purpose | Default |
 | --- | ------- | ------- |
@@ -61,9 +61,9 @@ Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile). Lower is
 Example with every key:
 
 ```rust
-use ticklog::{configure, ConsoleSink, Level, Backpressure};
+use ticklog::{ConsoleSink, Level, Backpressure};
 
-let _guard = configure! {
+let _guard = ticklog::configure! {
     sink: ConsoleSink::stderr(),
     max_level: Level::Trace,
     backpressure: Backpressure::Drop,
