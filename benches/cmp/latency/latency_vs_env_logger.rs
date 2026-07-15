@@ -5,7 +5,7 @@ mod workloads;
 
 use std::io;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 fn bench_env_logger(c: &mut Criterion) {
     let sink = Box::new(io::sink());

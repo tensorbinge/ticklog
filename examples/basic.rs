@@ -10,7 +10,7 @@
 use std::fs;
 use std::io;
 
-use ticklog::{error, info, warn, FileSink, Level};
+use ticklog::{FileSink, Level, error, info, warn};
 
 fn main() -> io::Result<()> {
     // Write to ./logs/basic.log

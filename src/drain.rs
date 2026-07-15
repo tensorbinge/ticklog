@@ -4,8 +4,8 @@
 //! This is the only module that performs raw-pointer arithmetic. All byte
 //! access goes through [`Cursor`], the sole audit point for unsafe reads.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::encode::{FIXED_SIZES, TAG_COUNT, TAG_STR};
 use crate::format::{self, FormatSpec};
@@ -14,10 +14,10 @@ use crate::record::{
     END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
     LOG_RECORD, VERSION,
 };
-use crate::ring::{align_up, RingBuffer, RING_SIZE, SLOT_SIZE};
+use crate::ring::{RING_SIZE, RingBuffer, SLOT_SIZE, align_up};
 use crate::sink::LogSink;
 use crate::thread_buf::REGISTRY;
-use crate::timestamp::{format_iso8601, ticks_to_ns, Calibration};
+use crate::timestamp::{Calibration, format_iso8601, ticks_to_ns};
 
 /// Spin batch used when the drain is freshly idle or has just done work.
 const SPIN_MIN: u32 = 8;
@@ -942,7 +942,7 @@ mod tests {
         let mut data = (5u16).to_le_bytes().to_vec();
         data.extend_from_slice(b"hello");
         data.push(0x99); // trailing byte after the string
-                         // SAFETY: the length prefix (5) matches the 5 string bytes present.
+        // SAFETY: the length prefix (5) matches the 5 string bytes present.
         unsafe {
             let mut c = Cursor::new(data.as_ptr(), data.len());
             let (s, len) = c.read_len_prefixed();
@@ -1215,7 +1215,6 @@ mod tests {
         assert!(recorded[0].0.ends_with("first"), "got {:?}", recorded[0].0);
     }
 
-
     #[test]
     fn poll_skips_end_of_buffer_record() {
         let (mut drain, calls) = capture_drain();
@@ -1395,7 +1394,9 @@ mod tests {
                 for _ in 0..N {
                     let len = record.len();
                     let slot = ring.reserve(len, Backpressure::Block).unwrap();
-                    unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len);
+                    }
                     ring.publish(slot);
                 }
             })
@@ -1414,7 +1415,10 @@ mod tests {
         while calls.lock().unwrap().len() < N {
             drain_ring(&ring, mask, &mut sink, 0, &metadata, &calibration, &mut buf);
             guard += 1;
-            assert!(guard < 1_000_000, "drain stalled before consuming all records");
+            assert!(
+                guard < 1_000_000,
+                "drain stalled before consuming all records"
+            );
         }
 
         producer.join().unwrap();

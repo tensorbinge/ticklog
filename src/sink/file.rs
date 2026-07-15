@@ -99,15 +99,15 @@ mod tests {
 
     fn read_to_string(path: &Path) -> String {
         let mut s = String::new();
-        File::open(path)
-            .unwrap()
-            .read_to_string(&mut s)
-            .unwrap();
+        File::open(path).unwrap().read_to_string(&mut s).unwrap();
         s
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation")]
+    #[cfg_attr(
+        miri,
+        ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation"
+    )]
     fn accept_writes_line_and_newline_after_flush() {
         let path = temp_path("write");
         let mut sink = FileSink::new(&path).unwrap();
@@ -119,12 +119,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation")]
+    #[cfg_attr(
+        miri,
+        ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation"
+    )]
     fn flush_persists_the_tail() {
         let path = temp_path("flush_tail");
         let mut sink = FileSink::new(&path).unwrap();
         for i in 0..3 {
-            sink.accept(format!("line {i}").as_bytes(), Level::Info).unwrap();
+            sink.accept(format!("line {i}").as_bytes(), Level::Info)
+                .unwrap();
         }
         sink.flush().unwrap();
         assert_eq!(read_to_string(&path), "line 0\nline 1\nline 2\n");
@@ -132,7 +136,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation")]
+    #[cfg_attr(
+        miri,
+        ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation"
+    )]
     fn new_appends_to_existing_content() {
         let path = temp_path("append");
         {
@@ -151,7 +158,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation")]
+    #[cfg_attr(
+        miri,
+        ignore = "fs::remove_file calls libc::unlink, not available under Miri isolation"
+    )]
     fn truncate_discards_existing_content() {
         let path = temp_path("truncate");
         {

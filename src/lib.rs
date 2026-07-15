@@ -151,8 +151,8 @@ pub use thread_buf::warm_up;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::builder::__configure_rt;
-    pub use crate::record::BASE_RECORD_SIZE;
     pub use crate::encode::LoggableArgs;
     pub use crate::format::check_fmt;
     pub use crate::macros::dispatch;
+    pub use crate::record::BASE_RECORD_SIZE;
 }

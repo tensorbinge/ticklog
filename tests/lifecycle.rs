@@ -11,7 +11,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use ticklog::{info, Level, LogSink};
+use ticklog::{Level, LogSink, info};
 
 /// Records every accepted line for post-shutdown assertions.
 struct CaptureSink {

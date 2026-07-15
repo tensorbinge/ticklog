@@ -2,11 +2,11 @@
 //! formatted and delivered every one, then report wall-clock time.
 
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use ticklog::{info, Level, LogSink};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use ticklog::{Level, LogSink, info};
 
 /// Counts delivered records and runs formatted bytes through `black_box`.
 struct CountingSink {

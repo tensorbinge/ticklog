@@ -61,15 +61,7 @@ pub fn dispatch(
         if let Some(slot) = tb.ring.reserve(total_size, policy) {
             let timestamp = timestamp::raw_timestamp();
             record::assemble(
-                slot.ptr,
-                level,
-                timestamp,
-                fmt,
-                file,
-                line,
-                n_args,
-                total_size,
-                write_args,
+                slot.ptr, level, timestamp, fmt, file, line, n_args, total_size, write_args,
             );
             tb.ring.publish(slot);
         }

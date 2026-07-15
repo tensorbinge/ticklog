@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ticklog::{debug, error, info, trace, warn, Level, LogSink};
+use ticklog::{Level, LogSink, debug, error, info, trace, warn};
 
 /// A sink that records every accepted line, for assertions after shutdown.
 struct CaptureSink {

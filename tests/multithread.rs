@@ -11,7 +11,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use ticklog::{info, Backpressure, Level, LogSink};
+use ticklog::{Backpressure, Level, LogSink, info};
 
 const THREADS: usize = 8;
 const RECORDS_PER_THREAD: usize = 1_000;

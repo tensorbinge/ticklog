@@ -14,7 +14,7 @@
 use std::io;
 use std::sync::{Arc, Condvar, Mutex};
 
-use ticklog::{info, Backpressure, Level, LogSink};
+use ticklog::{Backpressure, Level, LogSink, info};
 
 /// More records than any ring can hold, so saturation and drops are guaranteed
 /// on every platform (a 1 MB ring holds at most ~16k of these records).

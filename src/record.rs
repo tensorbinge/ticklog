@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(buf[args_at], 2); // count
         assert_eq!(buf[args_at + 1], 0x06); // u16 tag
         assert_eq!(buf[args_at + 2], 0x0A); // bool tag
-                                            // Payloads follow the two tags.
+        // Payloads follow the two tags.
         assert_eq!(read_u16(&buf, args_at + 3), 0x1234);
         assert_eq!(buf[args_at + 5], 1); // bool true
     }

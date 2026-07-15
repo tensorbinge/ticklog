@@ -5,7 +5,7 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use ticklog::{debug, error, info, trace, warn, Level, LogSink};
+use ticklog::{Level, LogSink, debug, error, info, trace, warn};
 
 /// Captures every accepted `(line, level)` pair.
 struct CaptureSink {

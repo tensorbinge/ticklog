@@ -9,8 +9,8 @@ mod affinity;
 
 use std::io::{self, Write};
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use ticklog::{info, Level, LogSink};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use ticklog::{Level, LogSink, info};
 
 struct NullSink;
 

@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ticklog::{info, Level, LogSink};
+use ticklog::{Level, LogSink, info};
 
 /// A sink that records every accepted line, for assertions after shutdown.
 struct CaptureSink {

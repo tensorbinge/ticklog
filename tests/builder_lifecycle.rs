@@ -17,11 +17,8 @@ fn configure_spawns_drain_rejects_second_init_and_joins_on_drop() {
 
     // The registry is now claimed; a second call to the underlying runtime init
     // must be rejected without spawning another drain.
-    let second = ticklog::__private::__configure_rt(
-        Box::new(WriterSink::new(std::io::sink())),
-        0,
-        None,
-    );
+    let second =
+        ticklog::__private::__configure_rt(Box::new(WriterSink::new(std::io::sink())), 0, None);
     assert!(matches!(second, Err(TicklogError::AlreadyInitialized)));
 
     // Dropping the guard signals shutdown and joins the drain thread. A hung

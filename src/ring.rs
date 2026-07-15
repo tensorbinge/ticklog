@@ -151,11 +151,7 @@ impl RingBuffer {
     /// Single-producer: the calling thread is the sole writer of this ring's
     /// `head` and `tail_cache`.
     #[inline]
-    pub(crate) fn reserve(
-        &self,
-        total_size: usize,
-        policy: Backpressure,
-    ) -> Option<Reservation> {
+    pub(crate) fn reserve(&self, total_size: usize, policy: Backpressure) -> Option<Reservation> {
         debug_assert!(
             total_size <= MAX_RECORD_SIZE,
             "invariant: total_size must fit the u16 total_size field"
@@ -483,7 +479,9 @@ mod tests {
         let record = [0xABu8; 40];
         let len = record.len();
         let slot = rb.reserve(len, Backpressure::Drop).unwrap();
-        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+        unsafe {
+            std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len);
+        }
         rb.publish(slot);
 
         // Head advances by the slot-aligned record size.
@@ -511,7 +509,9 @@ mod tests {
         let aligned = align_up(record.len() as u64, slot); // == 2 * slot
         let len = record.len();
         let res = rb.reserve(len, Backpressure::Drop).unwrap();
-        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), res.ptr, len); }
+        unsafe {
+            std::ptr::copy_nonoverlapping(record.as_ptr(), res.ptr, len);
+        }
         rb.publish(res);
 
         // Head advanced past the EOB filler (one slot) and the record.
@@ -563,7 +563,9 @@ mod tests {
         // Blocks until the drain thread frees space, then writes.
         let len = record.len();
         let slot = rb.reserve(len, Backpressure::Block).unwrap();
-        unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
+        unsafe {
+            std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len);
+        }
         rb.publish(slot);
         handle.join().unwrap();
 

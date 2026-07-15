@@ -5,7 +5,7 @@ mod workloads;
 
 use std::io;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 fn bench_tracing(c: &mut Criterion) {
     let (non_blocking, _guard) = tracing_appender::non_blocking(io::sink());

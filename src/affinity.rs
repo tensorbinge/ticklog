@@ -184,19 +184,28 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
+    #[cfg_attr(
+        miri,
+        ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri"
+    )]
     fn single_core_does_not_panic() {
         pin_thread(&[0]);
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
+    #[cfg_attr(
+        miri,
+        ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri"
+    )]
     fn multiple_cores_does_not_panic() {
         pin_thread(&[0, 1, 2, 3]);
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
+    #[cfg_attr(
+        miri,
+        ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri"
+    )]
     fn successive_calls_does_not_panic() {
         pin_thread(&[0]);
         pin_thread(&[1, 2]);
@@ -204,7 +213,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri")]
+    #[cfg_attr(
+        miri,
+        ignore = "FFI: mach_thread_self / sched_setaffinity not available under Miri"
+    )]
     fn large_core_number_does_not_panic() {
         pin_thread(&[usize::MAX]);
     }
@@ -255,7 +267,8 @@ mod tests {
         }
         let after = send_refs();
         assert_eq!(
-            after, before,
+            after,
+            before,
             "pin_thread leaked {} thread-port send-right refs over 16 calls",
             after as i64 - before as i64
         );

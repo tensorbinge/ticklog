@@ -1,8 +1,8 @@
 //! Owns the drain thread. Dropping the [`Guard`] shuts down the drain and
 //! waits for it to complete its final poll cycle.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 use crate::thread_buf::REGISTRY;
@@ -70,8 +70,8 @@ impl Drop for Guard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::thread;
 
     #[test]

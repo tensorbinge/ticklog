@@ -8,7 +8,7 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use ticklog::{debug, error, info, trace, warn, FanOut, Level, LogSink, LogSinkExt};
+use ticklog::{FanOut, Level, LogSink, LogSinkExt, debug, error, info, trace, warn};
 
 /// Captures the level of every record it accepts.
 struct CaptureSink {

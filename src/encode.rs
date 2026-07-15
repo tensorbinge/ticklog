@@ -123,7 +123,9 @@ impl LoggableArgs for () {
 impl<H: Loggable, T: LoggableArgs> LoggableArgs for (&H, T) {
     #[inline(always)]
     fn args_encoded_size(&self) -> usize {
-        self.0.encoded_size().wrapping_add(self.1.args_encoded_size())
+        self.0
+            .encoded_size()
+            .wrapping_add(self.1.args_encoded_size())
     }
 
     #[inline(always)]

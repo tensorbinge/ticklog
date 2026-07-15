@@ -23,7 +23,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::io;
 
-use ticklog::{info, warm_up, Level, WriterSink};
+use ticklog::{Level, WriterSink, info, warm_up};
 
 thread_local! {
     /// Heap allocations observed on this thread while counting is enabled.

@@ -3,7 +3,7 @@
 use std::io;
 use std::sync::{Arc, Barrier};
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 const RECORDS_PER_THREAD: u64 = 1_000;
 
@@ -14,11 +14,7 @@ fn thread_counts() -> Vec<u32> {
     match std::env::var("TICKLOG_SCALING_THREADS") {
         Ok(s) => {
             let v: Vec<u32> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            if v.is_empty() {
-                vec![1, 2, 4, 8]
-            } else {
-                v
-            }
+            if v.is_empty() { vec![1, 2, 4, 8] } else { v }
         }
         Err(_) => vec![1, 2, 4, 8],
     }

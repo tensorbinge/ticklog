@@ -2,7 +2,7 @@
 
 use std::io;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 const ONE_U64_BYTES: u64 = 50;
 

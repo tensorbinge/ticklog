@@ -12,7 +12,7 @@
 
 use std::io::{self, Write};
 
-use ticklog::{error, info, warn, Level, LogSink};
+use ticklog::{Level, LogSink, error, info, warn};
 
 /// A sink that prints each line to stdout with a marker and tallies how many
 /// records it has accepted.

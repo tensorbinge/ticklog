@@ -10,7 +10,7 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use ticklog::{info, Backpressure, Level, LogSink};
+use ticklog::{Backpressure, Level, LogSink, info};
 
 /// Several times a 1 MB ring's capacity, so the producer must block and wait
 /// for the drain repeatedly during the run.

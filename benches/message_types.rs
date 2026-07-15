@@ -3,8 +3,8 @@
 
 use std::io;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use ticklog::{info, Level, LogSink};
+use criterion::{Criterion, criterion_group, criterion_main};
+use ticklog::{Level, LogSink, info};
 
 struct NullSink;
 

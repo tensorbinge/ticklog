@@ -13,7 +13,7 @@ use std::fs;
 use std::io;
 
 use logroller::{LogRollerBuilder, Rotation, RotationAge};
-use ticklog::{error, info, warn, Level, WriterSink};
+use ticklog::{Level, WriterSink, error, info, warn};
 
 fn main() -> io::Result<()> {
     fs::create_dir_all("logs")?;

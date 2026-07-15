@@ -3,7 +3,7 @@
 #[path = "../../common/workloads.rs"]
 mod workloads;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use slog::Drain;
 
 fn bench_slog(c: &mut Criterion) {

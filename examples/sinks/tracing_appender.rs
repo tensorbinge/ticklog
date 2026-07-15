@@ -12,7 +12,7 @@
 use std::fs;
 use std::io;
 
-use ticklog::{error, info, warn, Level, WriterSink};
+use ticklog::{Level, WriterSink, error, info, warn};
 use tracing_appender::rolling;
 
 fn main() -> io::Result<()> {

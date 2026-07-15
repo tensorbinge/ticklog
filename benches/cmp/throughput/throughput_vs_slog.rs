@@ -1,6 +1,6 @@
 //! Rust ecosystem comparison: `slog` throughput.
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use slog::Drain;
 
 const ONE_U64_BYTES: u64 = 50;
