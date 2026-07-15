@@ -37,26 +37,63 @@ info!("listening on {}", 8080);
 
 ## Benchmarks
 
-Per-call latency on a Mac (M4, macOS 15, Rust 1.85, `release` profile). Lower is better.
+Per-call latency (p50). Lower is better.
 
-| Logger      | info!("x={}", 42u64) | info!("{}", "hello world") | info!("{} {} {}", 42u64, 3.14159, "hello world") |
-| ----------- | -------------------: | -------------------------: | -----------------------------------------------: |
-| **ticklog** |           **5.2 ns** |                 **5.9 ns** |                                       **7.0 ns** |
-| env_logger  |               231 ns |                     232 ns |                                           307 ns |
-| slog        |               274 ns |                     269 ns |                                           454 ns |
-| tracing     |               386 ns |                     425 ns |                                           458 ns |
+### Benchmark names
+
+| Name    | Log call                                           |
+| ------- | -------------------------------------------------- |
+| one_u64 | `info!("x={}", 42u64)`                             |
+| one_str | `info!("{}", "hello world")`                       |
+| mixed   | `info!("{} {} {}", 42u64, 3.14159, "hello world")` |
+
+### Rust Ecosystem
+
+**Mac M4** (Apple M4, 4.4 GHz, macOS 15):
+
+| Logger      |    one_u64 |    one_str |      mixed |
+| ----------- | ---------: | ---------: | ---------: |
+| **ticklog** | **5.2 ns** | **5.9 ns** | **7.0 ns** |
+| env_logger  |     231 ns |     232 ns |     307 ns |
+| slog        |     274 ns |     269 ns |     454 ns |
+| tracing     |     386 ns |     425 ns |     458 ns |
+
+**Granite Rapids** (Intel Xeon 6982P-C, 3.9 GHz, Ubuntu 24.04):
+
+| Logger      |    one_u64 |    one_str |      mixed |
+| ----------- | ---------: | ---------: | ---------: |
+| **ticklog** | **8.6 ns** | **8.4 ns** | **9.9 ns** |
+| env_logger  |     370 ns |     371 ns |     491 ns |
+| slog        |     499 ns |     453 ns |     686 ns |
+| tracing     |     837 ns |     854 ns |     937 ns |
+
+Run with `cargo bench --bench latency_vs_baseline` (ticklog) and `cargo bench --bench latency_vs_<logger>` (others).
+
+### Cross-Language Comparison
+
+Granite Rapids bare metal, identical protocol (BATCH=1000, RDTSC). All numbers p50, single thread.
+
+| Logger      | Language |    one_u64 |    one_str |      mixed |
+| ----------- | -------- | ---------: | ---------: | ---------: |
+| nanolog     | C++      |     7.6 ns |     7.6 ns |     7.7 ns |
+| **ticklog** | **Rust** | **7.6 ns** | **7.8 ns** | **8.4 ns** |
+| quill       | C++      |     7.7 ns |    10.0 ns |     9.9 ns |
+| zerolog     | Go       |    56.8 ns |    60.6 ns |   114.0 ns |
+| zap         | Go       |   286.3 ns |   296.2 ns |   391.3 ns |
+
+Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --cpu <n> --drain-cpu <m> --no-perf`. See [cross-lang-bench](cross-lang-bench/) for details.
 
 ## Configuration
 
 `ticklog::configure!` accepts these keys, each optional:
 
-| Key | Purpose | Default |
-| --- | ------- | ------- |
-| `sink` | Where output goes. | `ConsoleSink` on stderr |
-| `max_level` | Records above this level are dropped on the calling thread before any encoding. | `Level::Info` |
-| `backpressure` | What a logging thread does when its buffer is full. | `Backpressure::Drop` |
-| `timezone_offset` | Seconds east of UTC, applied to timestamp formatting only. | `0` (UTC) |
-| `drain_affinity` | Pin the background thread to a set of logical CPUs. | none |
+| Key               | Purpose                                                                         | Default                 |
+| ----------------- | ------------------------------------------------------------------------------- | ----------------------- |
+| `sink`            | Where output goes.                                                              | `ConsoleSink` on stderr |
+| `max_level`       | Records above this level are dropped on the calling thread before any encoding. | `Level::Info`           |
+| `backpressure`    | What a logging thread does when its buffer is full.                             | `Backpressure::Drop`    |
+| `timezone_offset` | Seconds east of UTC, applied to timestamp formatting only.                      | `0` (UTC)               |
+| `drain_affinity`  | Pin the background thread to a set of logical CPUs.                             | none                    |
 
 Example with every key:
 
