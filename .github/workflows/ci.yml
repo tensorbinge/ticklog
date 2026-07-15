@@ -82,10 +82,10 @@ jobs:
           shared-key: miri
 
       - name: cargo miri setup
-        run: cargo miri setup
+        run: cargo +nightly miri setup
 
       - name: Run Miri tests
-        run: cargo miri test --lib
+        run: cargo +nightly miri test --lib
         env:
           MIRIFLAGS: -Zmiri-tree-borrows -Zmiri-strict-provenance
 
