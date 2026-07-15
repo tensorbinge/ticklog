@@ -123,4 +123,4 @@ let worker = std::thread::spawn(|| {
 
 ## License
 
-MIT
+MIT OR Apache-2.0
