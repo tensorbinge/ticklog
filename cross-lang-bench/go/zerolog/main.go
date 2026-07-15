@@ -41,10 +41,6 @@ const (
 
 	// totalMessages is the total log messages per config: samples * batch.
 	totalMessages = samples * batch
-
-	// Pacing range between batches, microseconds.
-	paceMinUs = 1000
-	paceMaxUs = 3000
 )
 
 // threadCounts to benchmark.
@@ -115,26 +111,6 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[rank]
 }
 
-// Pacing
-// randomPause busy-waits for a random duration in [1, 3] milliseconds.
-//
-// Uses a simple LCG seeded from the counter and the resolved ns_per_tick
-// to convert microseconds to counter ticks accurately on any platform.
-func randomPause(nsPerTick float64) {
-	seed := tsc.ReadCounter()
-	rangeUs := uint64(paceMaxUs - paceMinUs)
-	r := (seed*6364136223846793005 + 1) % (rangeUs + 1)
-	us := paceMinUs + r
-	// Convert microseconds to counter ticks: divide by ns_per_tick.
-	// At 1 tick/ns (1 GHz):   us * 1000 ticks.
-	// At 24 MHz:              us * 24   ticks (approximately).
-	ns := float64(us) * 1000.0
-	ticks := uint64(ns / nsPerTick)
-	target := tsc.ReadCounter()
-	for tsc.ReadCounter()-target < ticks {
-		// busy-wait — the counter call prevents loop elimination.
-	}
-}
 
 // Measurement
 // configResult is one row in the output JSON array.
@@ -159,7 +135,6 @@ type output struct {
 	BatchSize     int            `json:"batch_size"`
 	TotalMessages uint64         `json:"total_messages"`
 	NumSamples    int            `json:"samples"`
-	PacingUs      [2]uint64      `json:"pacing_us"`
 	Results       []configResult `json:"results"`
 }
 
@@ -206,7 +181,6 @@ func measureConfig(nsPerTick float64, wl workload, nThreads int) configResult {
 				perCallNs := ns / float64(batch)
 				threadLats = append(threadLats, perCallNs)
 
-				randomPause(nsPerTick)
 			}
 			latencies[threadIdx] = threadLats
 		}(t)
@@ -327,7 +301,6 @@ func main() {
 		BatchSize:     batch,
 		TotalMessages: totalMessages,
 		NumSamples:    samples,
-		PacingUs:      [2]uint64{paceMinUs, paceMaxUs},
 		Results:       results,
 	}
 

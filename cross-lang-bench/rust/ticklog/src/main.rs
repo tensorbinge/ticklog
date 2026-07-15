@@ -25,10 +25,6 @@ const SAMPLES: usize = 10_000;
 /// Total log messages per config: SAMPLES * BATCH.
 const TOTAL_MESSAGES: u64 = (SAMPLES * BATCH) as u64;
 
-/// Pacing range between batches, microseconds.
-const PACE_MIN_US: u64 = 1000;
-const PACE_MAX_US: u64 = 3000;
-
 // Platform counter
 /// Read the platform-specific monotonic hardware counter.
 ///
@@ -166,24 +162,6 @@ fn percentile(samples: &[f64], p: f64) -> f64 {
     samples[idx]
 }
 
-// Pacing
-/// Busy-wait for a random duration in `[min_us, max_us]` microseconds.
-/// Uses a simple linear congruential generator seeded from the counter.
-fn random_pause(min_us: u64, max_us: u64) {
-    let range = max_us - min_us;
-    // Cheapest possible PRNG: mix the counter into a multiplier.
-    let seed = read_counter();
-    let r = (seed.wrapping_mul(6364136223846793005).wrapping_add(1)) % (range + 1);
-    let us = min_us + r;
-    let target = read_counter();
-    // Convert us to counter ticks using a rough 1 GHz baseline -- the
-    // exact conversion is not critical for a sleep interval.
-    let ticks = us * 1000; // approx at 1 tick/ns
-    while read_counter().wrapping_sub(target) < ticks {
-        std::hint::spin_loop();
-    }
-}
-
 // Single-threaded measurement
 /// Run one (workload, thread_count) configuration and return the
 /// measured percentiles and throughput.
@@ -224,7 +202,6 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
                 let per_call_ns = ns / BATCH as f64;
                 latencies.push(per_call_ns);
 
-                random_pause(PACE_MIN_US, PACE_MAX_US);
             }
 
             latencies
@@ -404,7 +381,6 @@ struct Output {
     batch_size: usize,
     total_messages: u64,
     samples: usize,
-    pacing_us: [u64; 2],
     results: Vec<ConfigResult>,
 }
 
@@ -453,7 +429,6 @@ fn main() {
         batch_size: BATCH,
         total_messages: TOTAL_MESSAGES,
         samples: SAMPLES,
-        pacing_us: [PACE_MIN_US, PACE_MAX_US],
         results,
     };
 

@@ -33,8 +33,6 @@
 static constexpr int BATCH = 1000;
 static constexpr int SAMPLES = 10'000;
 static constexpr uint64_t TOTAL_MESSAGES = static_cast<uint64_t>(SAMPLES) * BATCH;
-static constexpr uint64_t PACE_MIN_US = 1000;
-static constexpr uint64_t PACE_MAX_US = 3000;
 static constexpr int THREAD_COUNTS[] = {1, 2, 4};
 
 // -- Platform counter ---------------------------------------------------
@@ -117,19 +115,6 @@ static double percentile(const std::vector<double>& sorted, double p) {
     return sorted[static_cast<size_t>(rank)];
 }
 
-// -- Pacing -------------------------------------------------------------
-
-static void random_pause(double ns_per_tick) {
-    uint64_t seed = read_counter();
-    uint64_t range = PACE_MAX_US - PACE_MIN_US;
-    uint64_t r = (seed * 6364136223846793005ULL + 1) % (range + 1);
-    uint64_t us = PACE_MIN_US + r;
-    double ns = static_cast<double>(us) * 1000.0;
-    uint64_t ticks = static_cast<uint64_t>(ns / ns_per_tick);
-    uint64_t target = read_counter();
-    while (read_counter() - target < ticks) {}
-}
-
 // -- Spin barrier -------------------------------------------------------
 
 struct SpinBarrier {
@@ -159,7 +144,6 @@ struct Output {
     int batch_size;
     uint64_t total_messages;
     int samples;
-    uint64_t pacing_us[2];
     std::vector<ConfigResult> results;
 };
 
@@ -199,7 +183,6 @@ static ConfigResult measure_config(double ns_per_tick, Workload wl, int n_thread
                 double per_call_ns = ns / static_cast<double>(BATCH);
                 thread_lats.push_back(per_call_ns);
 
-                random_pause(ns_per_tick);
             }
         });
     }
@@ -281,9 +264,6 @@ static void write_output(const Output& out, const char* path) {
     std::fprintf(f, "  \"batch_size\": %d,\n", out.batch_size);
     std::fprintf(f, "  \"total_messages\": %llu,\n", static_cast<unsigned long long>(out.total_messages));
     std::fprintf(f, "  \"samples\": %d,\n", out.samples);
-    std::fprintf(f, "  \"pacing_us\": [%llu, %llu],\n",
-        static_cast<unsigned long long>(out.pacing_us[0]),
-        static_cast<unsigned long long>(out.pacing_us[1]));
     std::fprintf(f, "  \"results\": [\n");
 
     for (size_t i = 0; i < out.results.size(); i++) {
@@ -375,8 +355,6 @@ int main(int argc, char* argv[]) {
     out.batch_size = BATCH;
     out.total_messages = TOTAL_MESSAGES;
     out.samples = SAMPLES;
-    out.pacing_us[0] = PACE_MIN_US;
-    out.pacing_us[1] = PACE_MAX_US;
     out.results = std::move(results);
 
     write_output(out, output_path);

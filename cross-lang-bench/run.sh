@@ -11,9 +11,10 @@
 #   specify the isolated core (default: 1).
 #
 # Usage:
-#   ./run.sh                    # best-effort (macOS) or default Linux
-#   ./run.sh --cpu 2            # pin to CPU 2 (Linux only)
-#   ./run.sh --no-perf          # skip perf stat (Linux only)
+#   ./run.sh                        # best-effort (macOS) or default Linux
+#   ./run.sh --cpu 2                # pin to CPU 2 (Linux only)
+#   ./run.sh --cpu 2 --drain-cpu 4  # ticklog two-core placement
+#   ./run.sh --no-perf              # skip perf stat (Linux only)
 
 set -euo pipefail
 
@@ -22,6 +23,7 @@ cd "$SCRIPT_DIR"
 
 OS="$(uname -s)"
 CPU_CORE=""
+DRAIN_CORE=""
 USE_PERF=1
 DRY_RUN=0
 
@@ -31,6 +33,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --cpu)
             CPU_CORE="$2"
+            shift 2
+            ;;
+        --drain-cpu)
+            DRAIN_CORE="$2"
             shift 2
             ;;
         --no-perf)
@@ -43,7 +49,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "error: unknown flag '$1'" >&2
-            echo "usage: $0 [--cpu <n>] [--no-perf] [--dry-run]" >&2
+            echo "usage: $0 [--cpu <n>] [--drain-cpu <n>] [--no-perf] [--dry-run]" >&2
             exit 1
             ;;
     esac
@@ -106,6 +112,7 @@ fi
 run_one() {
     local name="$1"
     local bin="$2"
+    local extra_args="${3:-}"
 
     echo ""
     echo "=== Running $name ==="
@@ -115,14 +122,15 @@ run_one() {
         return
     fi
 
+    local pin="$PIN_PREFIX"
     local cmd
     if [[ "$OS" == "Linux" && "$USE_PERF" -eq 1 ]]; then
-        cmd="$PIN_PREFIX perf stat -e cycles,instructions,cache-misses,cache-references,branches,branch-misses \
-            -o results/${name}.perf -- $bin --ns-per-tick $NS_PER_TICK --output results/${name}.json"
-    elif [[ -n "${PIN_PREFIX:-}" ]]; then
-        cmd="$PIN_PREFIX $bin --ns-per-tick $NS_PER_TICK --output results/${name}.json"
+        cmd="$pin perf stat -e cycles,instructions,cache-misses,cache-references,branches,branch-misses \
+            -o results/${name}.perf -- $bin --ns-per-tick $NS_PER_TICK --output results/${name}.json $extra_args"
+    elif [[ -n "${pin:-}" ]]; then
+        cmd="$pin $bin --ns-per-tick $NS_PER_TICK --output results/${name}.json $extra_args"
     else
-        cmd="$bin --ns-per-tick $NS_PER_TICK --output results/${name}.json"
+        cmd="$bin --ns-per-tick $NS_PER_TICK --output results/${name}.json $extra_args"
     fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -137,7 +145,17 @@ run_one() {
     fi
 }
 
-run_one "ticklog"  "rust/ticklog/target/release/ticklog-cross-lang-harness"
+if [[ -n "$CPU_CORE" && -n "$DRAIN_CORE" ]]; then
+    # Two-core placement for ticklog: producer on CPU_CORE, drain on DRAIN_CORE
+    PIN_PREFIX="taskset -c $CPU_CORE,$DRAIN_CORE"
+    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness" \
+        "--producer-core $CPU_CORE --backend-core $DRAIN_CORE"
+    # Restore single-core pinning for inline loggers
+    PIN_PREFIX="taskset -c $CPU_CORE"
+else
+    run_one "ticklog" "rust/ticklog/target/release/ticklog-cross-lang-harness"
+fi
+
 run_one "zerolog"  "bin/zerolog_harness"
 run_one "zap"      "bin/zap_harness"
 run_one "quill"    "cpp/quill/build/quill_harness"
