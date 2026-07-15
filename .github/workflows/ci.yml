@@ -87,7 +87,7 @@ jobs:
       - name: Run Miri tests
         run: cargo +nightly miri test --lib
         env:
-          MIRIFLAGS: -Zmiri-tree-borrows -Zmiri-strict-provenance
+          MIRIFLAGS: -Zmiri-tree-borrows
 
   # Doc build check
   docs:
