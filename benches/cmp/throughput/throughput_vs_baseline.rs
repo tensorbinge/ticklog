@@ -40,11 +40,11 @@ fn bench_baseline_throughput(c: &mut Criterion) {
 // -- ticklog throughput -----------------------------------------------
 
 fn bench_ticklog_throughput(c: &mut Criterion) {
-    let guard = ticklog::builder()
-        .sink(NullSink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("ticklog build");
+    let guard = ticklog::configure! {
+        sink: NullSink,
+        max_level: Level::Trace,
+    }
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     let mut g = c.benchmark_group("throughput_ticklog");

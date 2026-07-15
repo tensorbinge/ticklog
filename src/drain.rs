@@ -367,7 +367,7 @@ impl Drain {
     fn sync_rings(&mut self, mask: u64, buf: &mut Vec<u8>) {
         let mut registry = REGISTRY
             .get()
-            .expect("invariant: ring registry must be initialized by Builder::build before the drain starts")
+            .expect("invariant: ring registry must be initialized by configure! before the drain starts")
             .lock()
             .expect("invariant: ring registry mutex poisoned by a panic in another thread");
 

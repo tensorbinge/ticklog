@@ -28,7 +28,6 @@ pub(crate) const END_OF_BUFFER: u8 = 2;
 
 /// Fixed record header size in bytes: version, type, total_size, level, flags,
 /// pad, timestamp. Summed from field widths so it tracks the layout above.
-#[allow(unused)]
 pub(crate) const HEADER_SIZE: usize = size_of::<u8>()  // version
     + size_of::<u8>()   // type
     + size_of::<u16>()  // total_size
@@ -37,24 +36,21 @@ pub(crate) const HEADER_SIZE: usize = size_of::<u8>()  // version
     + size_of::<u8>()   // _pad
     + size_of::<u64>(); // timestamp
 /// Encoded size of the format section: an 8-byte pointer and a 2-byte length.
-#[allow(unused)]
 pub(crate) const FORMAT_SECTION_SIZE: usize = size_of::<u64>()  // fmt_ptr
     + size_of::<u16>(); // fmt_len
 /// Encoded size of the source section: an 8-byte pointer, a 2-byte length, and
 /// a 4-byte line number.
-#[allow(unused)]
 pub(crate) const SOURCE_SECTION_SIZE: usize = size_of::<u64>()  // file_ptr
     + size_of::<u16>()  // file_len
     + size_of::<u32>(); // line
 /// Size of the argument count byte that precedes the tags and payloads.
-#[allow(unused)]
 pub(crate) const COUNT_SIZE: usize = size_of::<u8>();
 
 /// Total size of a record's fixed sections, before any arguments: header,
 /// format, source, and the count byte. The logging macros hardcode this base
 /// (they expand in the caller's crate and cannot read this const); a
 /// compile-time assertion in `macros` guards the two against drift.
-pub(crate) const BASE_RECORD_SIZE: usize =
+pub const BASE_RECORD_SIZE: usize =
     HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + COUNT_SIZE;
 
 /// Flag bit: the format-string section is present.

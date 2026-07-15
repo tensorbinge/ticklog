@@ -1,7 +1,7 @@
 //! Writing log lines to stderr with [`ConsoleSink`](ticklog::ConsoleSink).
 //!
 //! `ConsoleSink::stderr()` is the default sink installed by
-//! [`builder`](ticklog::builder). Use it explicitly when you want to
+//! `configure!`. Use it explicitly when you want to
 //! combine stderr with another destination or override the color behavior.
 //!
 //! ```text
@@ -14,11 +14,11 @@ use ticklog::{ConsoleSink, Level, error, info, warn};
 
 fn main() -> io::Result<()> {
     // Default: stderr, colored only when stderr is a terminal.
-    let guard = ticklog::builder()
-        .sink(ConsoleSink::stderr())
-        .max_level(Level::Info)
-        .build()
-        .expect("ticklog builds once per process");
+    let guard = ticklog::configure! {
+        sink: ConsoleSink::stderr(),
+        max_level: Level::Info,
+    }
+    .expect("ticklog builds once per process");
 
     info!("listening on {}", 8080);
     warn!("disk {}% full", 91);

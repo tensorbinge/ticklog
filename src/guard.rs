@@ -5,13 +5,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use crate::thread_buf::REGISTRY;
+
 /// A running logger. Keep it alive for as long as you want to log.
 ///
-/// Returned by [`Builder::build`]. When the guard is dropped it flushes the
-/// sink, stops the background drain thread, and disables logging, so **any log
-/// call after the guard is dropped is a silent no-op**.
-///
-/// [`Builder::build`]: crate::Builder::build
+/// Returned by [`configure!`][crate::configure!]. When the guard is dropped it marks every
+/// ring dead, signals the drain to exit, and joins the drain thread.
 pub struct Guard {
     drain_thread: Option<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
@@ -33,15 +32,18 @@ impl Guard {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        // Lower the level ceiling to "off" before joining. Once the drain is
-        // gone, records written into a ring would never be consumed: under
-        // `Backpressure::Block` a producer whose ring fills would spin forever
-        // (the tail never advances), and under `Drop` records vanish silently.
-        // Disabling the ceiling here makes every producer short-circuit before
-        // touching a ring. Doing it *before* the join keeps the drain alive
-        // through the join window, so any producer already mid-write can still
-        // be unblocked; after the join returns, logging is a no-op.
-        crate::builder::disable_logging();
+        // Mark every registered ring dead before the drain exits. Under
+        // `Backpressure::Block` a producer whose ring fills checks `live` in
+        // its spin path and bails when false, preventing a hang after the
+        // drain is gone. Under `Drop` the ring fills and records are
+        // discarded silently.
+        if let Some(registry) = REGISTRY.get() {
+            if let Ok(rings) = registry.lock() {
+                for ring in rings.iter() {
+                    ring.live.store(false, Ordering::Release);
+                }
+            }
+        }
 
         // Signal the drain to exit at the top of its next poll cycle.
         // Release pairs with the drain's Acquire load of `shutdown`,

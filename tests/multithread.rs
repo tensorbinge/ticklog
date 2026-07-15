@@ -47,12 +47,12 @@ fn each_thread_sequence_arrives_ordered_and_complete() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Info)
-        .backpressure(Backpressure::Block)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Info,
+        backpressure: Backpressure::Block,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     let handles: Vec<_> = (0..THREADS)
         .map(|worker| {

@@ -74,11 +74,11 @@ fn bench_baseline_scaling(c: &mut Criterion) {
 // -- ticklog scaling --------------------------------------------------
 
 fn bench_ticklog_scaling(c: &mut Criterion) {
-    let guard = ticklog::builder()
-        .sink(NullSink)
-        .max_level(Level::Trace)
-        .build()
-        .expect("ticklog build");
+    let guard = ticklog::configure! {
+        sink: NullSink,
+        max_level: Level::Trace,
+    }
+    .expect("ticklog build");
     std::mem::forget(guard);
 
     let mut g = c.benchmark_group("scaling_ticklog");

@@ -1,8 +1,8 @@
 //! `warm_up` front-loads a thread's one-time costs so the first log after it
 //! allocates nothing on the caller.
 //!
-//! Two guarantees are checked under one `build()` (the registry is claimed once
-//! per process):
+//! Two guarantees are checked under one `configure!` (the registry is claimed
+//! once per process):
 //!
 //! 1. `warm_up` is idempotent -- a second call on an already-warmed thread is a
 //!    no-op that still returns `Ok`.
@@ -73,16 +73,16 @@ static ALLOCATOR: CountingAlloc = CountingAlloc;
 
 #[test]
 fn warm_up_is_idempotent_and_first_log_is_allocation_free() {
-    // build() and the sink live outside the measured window; a null sink keeps
+    // configure! and the sink live outside the measured window; a null sink keeps
     // the drain's own work irrelevant (it runs on another thread regardless).
-    let guard = ticklog::builder()
-        .sink(WriterSink::new(io::sink()))
-        .max_level(Level::Trace)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: WriterSink::new(io::sink()),
+        max_level: Level::Trace,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     // First call allocates the ring, scratch, and thread-local state.
-    warm_up().expect("warm_up after build must succeed");
+    warm_up().expect("warm_up after configure must succeed");
     // Second call is a no-op on an already-warmed thread.
     warm_up().expect("warm_up must be idempotent");
 

@@ -43,12 +43,12 @@ fn block_policy_never_loses_a_record() {
         lines: Arc::clone(&lines),
     };
 
-    let guard = ticklog::builder()
-        .sink(sink)
-        .max_level(Level::Info)
-        .backpressure(Backpressure::Block)
-        .build()
-        .expect("first build in a fresh process must succeed");
+    let guard = ticklog::configure! {
+        sink: sink,
+        max_level: Level::Info,
+        backpressure: Backpressure::Block,
+    }
+    .expect("first configure in a fresh process must succeed");
 
     for i in 0..PRODUCED {
         info!("seq={}", i as u64);

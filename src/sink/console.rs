@@ -1,7 +1,7 @@
 //! [`ConsoleSink`]: writes log lines to stdout or stderr, optionally colored by
 //! level.
 //!
-//! This is the default sink installed by [`builder`](crate::builder). Colors are
+//! This is the default sink installed by [`configure!`]. Colors are
 //! applied per level via ANSI SGR codes; [`ColorMode::Auto`] (the default)
 //! enables them only when the target stream is a terminal, so redirected output
 //! stays plain.
@@ -138,7 +138,7 @@ impl ConsoleSink {
     }
 
     /// Creates a console sink writing to standard error. This is the default
-    /// sink installed by [`builder`](crate::builder).
+    /// sink installed by [`configure!`][crate::configure!].
     pub fn stderr() -> Self {
         Self::with_stream(Stream::Stderr(io::stderr()))
     }

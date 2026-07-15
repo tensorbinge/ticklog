@@ -20,7 +20,7 @@
 //!
 //! | Logger | info!("x={}", 42u64) | info!("{}", "hello world") | info!("{} {} {}", 42u64, 3.14159, "hello world") |
 //! |--------|----------:|----------:|--------:|
-//! | **ticklog** | **8.0 ns** | **9.7 ns** | **11.6 ns** |
+//! | **ticklog** | **5.2 ns** | **5.9 ns** | **7.0 ns** |
 //! | env_logger | 231 ns | 232 ns | 307 ns |
 //! | slog | 274 ns | 269 ns | 454 ns |
 //! | tracing | 386 ns | 425 ns | 458 ns |
@@ -30,20 +30,20 @@
 //! ```no_run
 //! use ticklog::{info, FileSink};
 //!
-//! // Build the logger, then keep the returned guard alive for as long as you
+//! // Configure ticklog and keep the returned guard alive for as long as you
 //! // want to log.
-//! let _guard = ticklog::builder()
-//!     .sink(FileSink::new("app.log").unwrap())
-//!     .build()
-//!     .unwrap();
+//! let _guard = ticklog::configure! {
+//!     sink: FileSink::new("app.log").unwrap(),
+//! }
+//! .unwrap();
 //!
 //! info!("listening on {}", 8080);
 //! ```
 //!
-//! [`Builder::build`] may be called only once per process and returns a
+//! [`configure!`] may be called only once per process and returns a
 //! [`Guard`]. **Hold the guard for as long as you want to log:** when it is
-//! dropped it flushes the sink, stops the background drain thread, and disables
-//! logging, so every log call afterwards is a silent no-op.
+//! dropped it flushes the sink, stops the background drain thread, and marks
+//! every ring dead so subsequent log calls become silent no-ops.
 //!
 //! # Logging macros
 //!
@@ -52,6 +52,7 @@
 //!
 //! ```no_run
 //! # use ticklog::{info, error};
+//! # let _guard = ticklog::configure! {}.unwrap();
 //! info!("connected to {}", "db-01");
 //! error!("request {} failed after {} retries", 42, 3);
 //! ```
@@ -62,19 +63,19 @@
 //!
 //! # Configuration
 //!
-//! [`builder`] returns a [`Builder`] with these knobs:
+//! [`configure!`] accepts these keys, each optional:
 //!
-//! - [`sink`](Builder::sink): where output goes. Defaults to a [`ConsoleSink`]
-//!   on stderr (colored when stderr is a terminal).
-//! - [`max_level`](Builder::max_level): the level ceiling; records above it are
-//!   dropped on the hot path before any encoding. Defaults to [`Level::Info`].
-//! - [`backpressure`](Builder::backpressure): what a logging thread does when its
-//!   buffer is full, either [`Backpressure::Drop`] (the default, never blocks) or
+//! - `sink`: where output goes. Defaults to a [`ConsoleSink`] on stderr
+//!   (colored when stderr is a terminal).
+//! - `max_level`: the level ceiling; records above it are dropped on the hot
+//!   path before any encoding. Defaults to [`Level::Info`].
+//! - `backpressure`: what a logging thread does when its buffer is full, either
+//!   [`Backpressure::Drop`] (the default, never blocks) or
 //!   [`Backpressure::Block`] (spin until space frees up).
-//! - [`timezone_offset`](Builder::timezone_offset): offset applied when
-//!   formatting timestamps. Defaults to UTC.
-//! - [`drain_affinity`](Builder::drain_affinity): pin the drain thread to a set
-//!   of logical CPUs.
+//! - `timezone_offset`: offset applied when formatting timestamps. Defaults to
+//!   UTC (`0`).
+//! - `drain_affinity`: pin the drain thread to a set of logical CPUs
+//!   (`Option<Vec<usize>>`). Defaults to `None`.
 //!
 //! # Sinks
 //!
@@ -135,7 +136,7 @@ mod sink;
 mod thread_buf;
 mod timestamp;
 pub use affinity::pin_thread;
-pub use builder::{Backpressure, Builder, builder, init};
+pub use builder::Backpressure;
 pub use error::TicklogError;
 pub use guard::Guard;
 pub use level::Level;
@@ -149,7 +150,9 @@ pub use thread_buf::warm_up;
 /// in macro expansions.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::builder::__configure_rt;
+    pub use crate::record::BASE_RECORD_SIZE;
     pub use crate::encode::LoggableArgs;
     pub use crate::format::check_fmt;
-    pub use crate::macros::{dispatch, enabled};
+    pub use crate::macros::dispatch;
 }

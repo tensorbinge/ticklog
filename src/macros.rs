@@ -1,13 +1,13 @@
 //! The `trace!`, `debug!`, `info!`, `warn!`, and `error!` logging macros and
 //! the runtime entry point they expand into.
 //!
-//! Each macro checks the global level ceiling, and only if the record passes
-//! does it evaluate its arguments and call [`dispatch`]. Format-string syntax
-//! and the placeholder-to-argument count are checked at compile time via
+//! Each macro checks the compile-time level ceiling, and only if the record
+//! passes does it evaluate its arguments and call [`dispatch`]. Format-string
+//! syntax and the placeholder-to-argument count are checked at compile time via
 //! [`check_fmt`](crate::format::check_fmt); per-type specifier validity is
 //! resolved at runtime by the drain.
 
-use crate::builder;
+use crate::builder::Backpressure;
 use crate::level::Level;
 use crate::record;
 use crate::thread_buf::with_thread_buf;
@@ -20,26 +20,18 @@ use crate::timestamp;
 /// every record.
 const _: () = assert!(record::BASE_RECORD_SIZE == 41);
 
-/// Returns whether a record at `level` passes the current level ceiling.
-///
-/// A single relaxed atomic load, so the macros can gate on it at every call
-/// site and skip evaluating a record's arguments when its level is disabled.
-///
-/// Not part of the public API: called only by the logging macros.
-#[doc(hidden)]
-#[inline(always)]
-pub fn enabled(level: Level) -> bool {
-    builder::level_enabled(level)
-}
-
 /// Monomorphized dispatch: timestamps, assembles the record via
-/// [`assemble`](crate::record::assemble), and writes it to the
-/// thread's ring buffer.
+/// [`assemble`](crate::record::assemble), and writes it to the thread's ring
+/// buffer.
 ///
 /// The `write_args` closure is monomorphized per unique argument-type
 /// signature: the macro expands each `Loggable::type_tag()` /
 /// `Loggable::encode()` call as a direct (non-vtable) invocation against the
-/// concrete type. Not part of the public API.
+/// concrete type. `policy` is a compile-time constant from
+/// [`configure!`](crate::configure!) and is branch-folded away.
+///
+/// Not part of the public API.
+#[allow(clippy::too_many_arguments)]
 #[doc(hidden)]
 #[inline(always)]
 pub fn dispatch(
@@ -49,6 +41,7 @@ pub fn dispatch(
     line: u32,
     n_args: u8,
     total_size: usize,
+    policy: Backpressure,
     write_args: impl FnOnce(&mut [u8]),
 ) {
     // Drop, don't truncate, a record too large for the u16 `total_size` field.
@@ -64,7 +57,6 @@ pub fn dispatch(
         return;
     }
 
-    let policy = builder::backpressure();
     with_thread_buf(|tb| {
         if let Some(slot) = tb.ring.reserve(total_size, policy) {
             let timestamp = timestamp::raw_timestamp();
@@ -88,8 +80,8 @@ pub fn dispatch(
 /// macros (`trace!`, `debug!`, `info!`, `warn!`, `error!`).
 ///
 /// The format string is validated at compile time, then the argument values
-/// are evaluated only if the level passes the global ceiling. `file!()` and
-/// `line!()` capture the outer macro's call site.
+/// are evaluated only if the level passes the compile-time ceiling.
+/// `file!()` and `line!()` capture the outer macro's call site.
 ///
 /// Argument encoding uses monomorphized dispatch: each `Loggable` method
 /// call resolves to a concrete impl at compile time with no vtable overhead.
@@ -99,11 +91,11 @@ macro_rules! __ticklog_log {
     // Zero-argument arm: no args to encode, just the fixed record sections.
     ($level:expr, $fmt:literal $(,)?) => {{
         const _: () = $crate::__private::check_fmt($fmt, 0);
-        if $crate::__private::enabled($level) {
-            // 16 (header) + 10 (format) + 14 (source) + 1 (count) = 41
-            const __TOTAL: usize = 41;
+        if $level <= __ticklog_max_level!() {
+            const __TOTAL: usize = $crate::__private::BASE_RECORD_SIZE;
             $crate::__private::dispatch(
                 $level, $fmt, file!(), line!(), 0u8, __TOTAL,
+                __ticklog_backpressure!(),
                 |_buf| {},
             );
         }
@@ -114,13 +106,12 @@ macro_rules! __ticklog_log {
             $fmt,
             <[&str]>::len(&[$(stringify!($arg)),*]),
         );
-        if $crate::__private::enabled($level) {
+        if $level <= __ticklog_max_level!() {
             // Arg count is known at compile time: the same value that
             // check_fmt validates.
             const __N_ARGS: u8 =
                 <[&str]>::len(&[$(stringify!($arg)),*]) as u8;
-            // 16 (header) + 10 (format) + 14 (source) + 1 (count)
-            const __BASE: usize = 41;
+            const __BASE: usize = $crate::__private::BASE_RECORD_SIZE;
             // Evaluate each argument expression exactly once, into a cons-list of
             // references. Every later use reads these bindings, so a
             // side-effecting argument runs once rather than once per use.
@@ -130,6 +121,7 @@ macro_rules! __ticklog_log {
                 .wrapping_add($crate::__private::LoggableArgs::args_encoded_size(&__args));
             $crate::__private::dispatch(
                 $level, $fmt, file!(), line!(), __N_ARGS, __total_size,
+                __ticklog_backpressure!(),
                 |__buf: &mut [u8]| {
                     // Tags fill buf[0..n_args]; payloads follow.
                     let mut __tag: usize = 0;

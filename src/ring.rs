@@ -180,7 +180,7 @@ impl RingBuffer {
             aligned
         };
 
-        if !self.ensure_capacity(head, needed, policy) {
+        if !self.try_ensure_capacity(head, needed, policy) {
             return None;
         }
 
@@ -228,7 +228,7 @@ impl RingBuffer {
     ///
     /// Returns `true` once the space is available, or `false` if the record
     /// must be dropped under [`Backpressure::Drop`].
-    fn ensure_capacity(&self, head: u64, needed: u64, policy: Backpressure) -> bool {
+    fn try_ensure_capacity(&self, head: u64, needed: u64, policy: Backpressure) -> bool {
         // Fast path: trust the cached tail. Occupancy after the write is
         // `(head - tail) + needed`; it fits when that does not exceed RING_SIZE.
         // SAFETY: `tail_cache` is producer-private; only this thread touches
@@ -250,7 +250,12 @@ impl RingBuffer {
             }
             match policy {
                 Backpressure::Drop => return false,
-                Backpressure::Block => std::hint::spin_loop(),
+                Backpressure::Block => {
+                    if !self.live.load(Ordering::Relaxed) {
+                        return false;
+                    }
+                    std::hint::spin_loop();
+                }
             }
         }
     }
@@ -475,7 +480,7 @@ mod tests {
     #[test]
     fn write_record_places_record_and_advances_head() {
         let rb = RingBuffer::new();
-        let record = vec![0xABu8; 40];
+        let record = [0xABu8; 40];
         let len = record.len();
         let slot = rb.reserve(len, Backpressure::Drop).unwrap();
         unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len); }
@@ -533,7 +538,7 @@ mod tests {
         rb.tail.store(0, Ordering::Relaxed);
         unsafe { *rb.tail_cache.get() = 0 };
 
-        let record = vec![0u8; 40];
+        let record = [0u8; 40];
         assert!(rb.reserve(record.len(), Backpressure::Drop).is_none());
         // Head is unchanged: nothing was written.
         assert_eq!(rb.head.load(Ordering::Relaxed), RING_SIZE as u64);
@@ -554,7 +559,7 @@ mod tests {
             drain.tail.store(RING_SIZE as u64, Ordering::Release);
         });
 
-        let record = vec![0x5Au8; 40];
+        let record = [0x5Au8; 40];
         // Blocks until the drain thread frees space, then writes.
         let len = record.len();
         let slot = rb.reserve(len, Backpressure::Block).unwrap();

@@ -34,11 +34,11 @@ impl LogSink for MarkerSink {
 }
 
 fn main() {
-    let guard = ticklog::builder()
-        .sink(MarkerSink { count: 0 })
-        .max_level(Level::Trace) // admit every level so the sink sees them all
-        .build()
-        .expect("ticklog builds once per process");
+    let guard = ticklog::configure! {
+        sink: MarkerSink { count: 0 },
+        max_level: Level::Trace,
+    }
+    .expect("ticklog builds once per process");
 
     info!("listening on {}", 8080);
     warn!("disk {}% full", 91);

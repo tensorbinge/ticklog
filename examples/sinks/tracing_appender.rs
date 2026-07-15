@@ -21,11 +21,11 @@ fn main() -> io::Result<()> {
     // Rolls daily: writes ./logs/ticklog-tracing.log.<YYYY-MM-DD>.
     let appender = rolling::daily("logs", "ticklog-tracing.log");
 
-    let guard = ticklog::builder()
-        .sink(WriterSink::new(appender))
-        .max_level(Level::Info)
-        .build()
-        .expect("ticklog builds once per process");
+    let guard = ticklog::configure! {
+        sink: WriterSink::new(appender),
+        max_level: Level::Info,
+    }
+    .expect("ticklog builds once per process");
 
     info!("listening on {}", 8080);
     warn!("retry {} of {}", 3, 10);
