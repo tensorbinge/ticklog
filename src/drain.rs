@@ -583,7 +583,7 @@ fn decode_and_format(
         // SAFETY: the format section is 10 bytes (u64 ptr + u16 len) present
         // when FLAG_FORMAT is set.
         let (fmt_ptr, fmt_len) = unsafe {
-            let p = c.read_u64() as *const u8;
+            let p = std::ptr::with_exposed_provenance::<u8>(c.read_u64() as usize);
             let l = c.read_u16() as usize;
             (p, l)
         };
@@ -601,7 +601,7 @@ fn decode_and_format(
         // SAFETY: the source section is 14 bytes (u64 ptr + u16 len + u32 line)
         // present when FLAG_SOURCE is set.
         let (file_ptr, file_len, line) = unsafe {
-            let p = c.read_u64() as *const u8;
+            let p = std::ptr::with_exposed_provenance::<u8>(c.read_u64() as usize);
             let l = c.read_u16() as usize;
             let ln = c.read_u32();
             (p, l, ln)
