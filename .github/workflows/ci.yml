@@ -34,8 +34,11 @@ jobs:
         with:
           shared-key: test-${{ matrix.os }}
 
-      - name: Run tests (lib + integration + doc)
-        run: cargo test --lib --tests --doc
+      - name: Run tests (lib + integration)
+        run: cargo test --lib --tests
+
+      - name: Run doc tests
+        run: cargo test --doc
 
       - name: Compile examples
         run: cargo build --examples
