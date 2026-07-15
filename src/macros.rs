@@ -64,10 +64,10 @@ pub fn dispatch(
         return;
     }
 
-    let timestamp = timestamp::raw_timestamp();
     let policy = builder::backpressure();
     with_thread_buf(|tb| {
         if let Some(slot) = tb.ring.reserve(total_size, policy) {
+            let timestamp = timestamp::raw_timestamp();
             record::assemble(
                 slot.ptr,
                 level,
