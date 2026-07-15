@@ -11,8 +11,8 @@ use crate::encode::{FIXED_SIZES, TAG_COUNT, TAG_STR};
 use crate::format::{self, FormatSpec};
 use crate::level::Level;
 use crate::record::{
-    END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, LOG_RECORD,
-    VERSION,
+    END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
+    LOG_RECORD, VERSION,
 };
 use crate::ring::{align_up, RingBuffer, RING_SIZE, SLOT_SIZE};
 use crate::sink::LogSink;
@@ -493,6 +493,7 @@ fn drain_ring(
         // resume rather than walk off into garbage.
         if version != VERSION
             || (rectype != LOG_RECORD && rectype != END_OF_BUFFER)
+            || total_size < HEADER_SIZE as u64
             || offset + total_size as usize > RING_SIZE
         {
             eprintln!(

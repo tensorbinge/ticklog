@@ -212,6 +212,9 @@ mod tests {
                 }
             },
         );
+        // SAFETY: `assemble` wrote exactly `total_size` bytes into the
+        // Vec's allocation (reserved above); the region is initialized
+        // and the Vec's capacity is sufficient.
         unsafe { scratch.set_len(total_size) };
         true
     }
