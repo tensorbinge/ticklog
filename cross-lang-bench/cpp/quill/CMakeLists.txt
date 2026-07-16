@@ -15,7 +15,7 @@ include(FetchContent)
 FetchContent_Declare(
     quill
     GIT_REPOSITORY  https://github.com/odygrd/quill.git
-    GIT_TAG         v7.5.0
+    GIT_TAG         v12.1.0
     GIT_SHALLOW     TRUE
 )
 FetchContent_MakeAvailable(quill)

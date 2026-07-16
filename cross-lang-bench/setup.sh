@@ -4,7 +4,7 @@
 # Prerequisites:
 #   - C compiler (cc)
 #   - Rust toolchain (cargo)
-#   - Go 1.21+
+#   - Go 1.23+
 #   - CMake 3.20+
 #   - Linux only: make (for NanoLog runtime)
 #
