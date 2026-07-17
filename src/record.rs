@@ -45,6 +45,10 @@ pub(crate) const SOURCE_SECTION_SIZE: usize = size_of::<u64>()  // file_ptr
     + size_of::<u32>(); // line
 /// Size of the argument count byte that precedes the tags and payloads.
 pub(crate) const COUNT_SIZE: usize = size_of::<u8>();
+/// Encoded size of the thread section without the name bytes:
+/// an 8-byte thread id and a 2-byte name length prefix.
+pub(crate) const THREAD_SECTION_BASE_SIZE: usize = size_of::<u64>()  // thread_id
+    + size_of::<u16>(); // name_len
 
 /// Total size of a record's fixed sections, before any arguments: header,
 /// format, source, and the count byte. The logging macros hardcode this base
@@ -93,14 +97,16 @@ pub(crate) fn assemble(
     dst: *mut u8,
     level: Level,
     timestamp: u64,
+    flags: u16,
     fmt: &'static str,
     file: &'static str,
     line: u32,
+    thread_id: u64,
+    thread_name: Option<&str>,
     n_args: u8,
     total_size: usize,
     write_args: impl FnOnce(&mut [u8]),
 ) {
-    let flags = FLAG_FORMAT | FLAG_SOURCE;
     let total = total_size as u16;
     let level_u8 = level.to_u8();
 
@@ -145,6 +151,12 @@ pub(crate) fn assemble(
         put!((file.len() as u16).to_le_bytes());
         put!(line.to_le_bytes());
 
+        // Thread section
+        put!(thread_id.to_le_bytes());
+        let name_bytes = thread_name.map_or(&b""[..], |n| n.as_bytes());
+        put!((name_bytes.len() as u16).to_le_bytes());
+        put!(name_bytes);
+
         // Count byte
         put!([n_args]);
 
@@ -168,6 +180,8 @@ mod tests {
         fmt: &'static str,
         file: &'static str,
         line: u32,
+        thread_id: u64,
+        thread_name: Option<&str>,
         args: &[&dyn Loggable],
     ) -> bool {
         if args.len() > u8::MAX as usize {
@@ -181,8 +195,16 @@ mod tests {
         for arg in args {
             args_bytes += arg.encoded_size();
         }
-        let total_size =
-            HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + 1 + args.len() + args_bytes;
+        let thread_name_len = thread_name.map_or(0, |n| n.len());
+        let flags = FLAG_FORMAT | FLAG_SOURCE | FLAG_THREAD;
+        let total_size = HEADER_SIZE
+            + FORMAT_SECTION_SIZE
+            + SOURCE_SECTION_SIZE
+            + THREAD_SECTION_BASE_SIZE
+            + thread_name_len
+            + COUNT_SIZE
+            + args.len()
+            + args_bytes;
         if total_size > MAX_RECORD_SIZE {
             return false;
         }
@@ -194,9 +216,12 @@ mod tests {
             scratch.as_mut_ptr(),
             level,
             timestamp,
+            flags,
             fmt,
             file,
             line,
+            thread_id,
+            thread_name,
             n_args,
             total_size,
             |buf| {
@@ -237,14 +262,14 @@ mod tests {
     #[test]
     fn header_fields_are_written() {
         let mut buf = Vec::new();
-        let ok = check_assemble(&mut buf, Level::Warn, 0xABCD, "hi", "f.rs", 7, &[]);
+        let ok = check_assemble(&mut buf, Level::Warn, 0xABCD, "hi", "f.rs", 7, 1, None, &[]);
         assert!(ok);
 
         assert_eq!(buf[0], VERSION);
         assert_eq!(buf[1], LOG_RECORD);
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
         assert_eq!(buf[4], Level::Warn.to_u8());
-        assert_eq!(read_u16(&buf, 5), FLAG_FORMAT | FLAG_SOURCE);
+        assert_eq!(read_u16(&buf, 5), FLAG_FORMAT | FLAG_SOURCE | FLAG_THREAD);
         assert_eq!(buf[7], 0);
         assert_eq!(read_u64(&buf, 8), 0xABCD);
     }
@@ -254,7 +279,7 @@ mod tests {
         let fmt = "value {}";
         let file = "src/x.rs";
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Info, 0, fmt, file, 42, &[&1u64]);
+        check_assemble(&mut buf, Level::Info, 0, fmt, file, 42, 1, None, &[&1u64]);
 
         // Format section starts right after the header.
         let fmt_ptr = read_u64(&buf, HEADER_SIZE);
@@ -280,10 +305,15 @@ mod tests {
             "{} {}",
             "f",
             1,
+            1,
+            None,
             &[&0x1234u16, &true],
         );
 
-        let args_at = HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE;
+        let args_at = HEADER_SIZE
+            + FORMAT_SECTION_SIZE
+            + SOURCE_SECTION_SIZE
+            + THREAD_SECTION_BASE_SIZE;
         assert_eq!(buf[args_at], 2); // count
         assert_eq!(buf[args_at + 1], 0x06); // u16 tag
         assert_eq!(buf[args_at + 2], 0x0A); // bool tag
@@ -295,7 +325,7 @@ mod tests {
     #[test]
     fn total_size_matches_buffer_length() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Error, 0, "{}", "f", 1, &[&"hello"]);
+        check_assemble(&mut buf, Level::Error, 0, "{}", "f", 1, 1, None, &[&"hello"]);
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
     }
 
@@ -310,6 +340,8 @@ mod tests {
             "x",
             "f",
             1,
+            1,
+            None,
             &args
         ));
     }
@@ -326,6 +358,8 @@ mod tests {
             "{}",
             "f",
             1,
+            1,
+            None,
             &[&big.as_str()]
         ));
     }
@@ -333,8 +367,11 @@ mod tests {
     #[test]
     fn zero_args_writes_count_zero() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Info, 0, "static", "f", 1, &[]);
-        let args_at = HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE;
+        check_assemble(&mut buf, Level::Info, 0, "static", "f", 1, 1, None, &[]);
+        let args_at = HEADER_SIZE
+            + FORMAT_SECTION_SIZE
+            + SOURCE_SECTION_SIZE
+            + THREAD_SECTION_BASE_SIZE;
         assert_eq!(buf[args_at], 0);
         assert_eq!(buf.len(), args_at + 1);
     }
