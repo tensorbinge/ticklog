@@ -310,10 +310,8 @@ mod tests {
             &[&0x1234u16, &true],
         );
 
-        let args_at = HEADER_SIZE
-            + FORMAT_SECTION_SIZE
-            + SOURCE_SECTION_SIZE
-            + THREAD_SECTION_BASE_SIZE;
+        let args_at =
+            HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + THREAD_SECTION_BASE_SIZE;
         assert_eq!(buf[args_at], 2); // count
         assert_eq!(buf[args_at + 1], 0x06); // u16 tag
         assert_eq!(buf[args_at + 2], 0x0A); // bool tag
@@ -325,7 +323,17 @@ mod tests {
     #[test]
     fn total_size_matches_buffer_length() {
         let mut buf = Vec::new();
-        check_assemble(&mut buf, Level::Error, 0, "{}", "f", 1, 1, None, &[&"hello"]);
+        check_assemble(
+            &mut buf,
+            Level::Error,
+            0,
+            "{}",
+            "f",
+            1,
+            1,
+            None,
+            &[&"hello"],
+        );
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
     }
 
@@ -368,10 +376,8 @@ mod tests {
     fn zero_args_writes_count_zero() {
         let mut buf = Vec::new();
         check_assemble(&mut buf, Level::Info, 0, "static", "f", 1, 1, None, &[]);
-        let args_at = HEADER_SIZE
-            + FORMAT_SECTION_SIZE
-            + SOURCE_SECTION_SIZE
-            + THREAD_SECTION_BASE_SIZE;
+        let args_at =
+            HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + THREAD_SECTION_BASE_SIZE;
         assert_eq!(buf[args_at], 0);
         assert_eq!(buf.len(), args_at + 1);
     }

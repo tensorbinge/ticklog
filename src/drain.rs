@@ -804,7 +804,9 @@ fn append_u64(mut v: u64, buf: &mut Vec<u8>) {
 mod tests {
     use super::*;
     use crate::encode::{TAG_BOOL, TAG_F64, TAG_I64, TAG_U16, TAG_U64};
-    use crate::record::{FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, THREAD_SECTION_BASE_SIZE, VERSION};
+    use crate::record::{
+        FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, THREAD_SECTION_BASE_SIZE, VERSION,
+    };
     use std::io;
     use std::sync::{Mutex, OnceLock};
 
@@ -1094,10 +1096,7 @@ mod tests {
             &[le_bytes(TAG_U64, 42)],
         );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(
-            line,
-            "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",
-        );
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",);
     }
 
     #[test]
@@ -1138,20 +1137,22 @@ mod tests {
             &[le_bytes(TAG_U16, 5), str_arg("ok"), le_bytes(TAG_BOOL, 1)],
         );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(
-            line,
-            "1970-01-01T00:00:00.000000000Z  ERROR 5 ok true",
-        );
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  ERROR 5 ok true",);
     }
 
     #[test]
     fn decode_escaped_braces() {
-        let record = build_record(Level::Info, 0, "{{{}}}", None, 1, None, &[le_bytes(TAG_U64, 9)]);
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(
-            line,
-            "1970-01-01T00:00:00.000000000Z  INFO {9}",
+        let record = build_record(
+            Level::Info,
+            0,
+            "{{{}}}",
+            None,
+            1,
+            None,
+            &[le_bytes(TAG_U64, 9)],
         );
+        let line = format_line(&record, LogMetadata::default());
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO {9}",);
     }
 
     #[test]
@@ -1168,12 +1169,17 @@ mod tests {
     #[test]
     fn decode_missing_arg_placeholder() {
         // Two placeholders but only one argument supplied.
-        let record = build_record(Level::Info, 0, "{} {}", None, 1, None, &[le_bytes(TAG_U64, 1)]);
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(
-            line,
-            "1970-01-01T00:00:00.000000000Z  INFO 1 <missing arg>",
+        let record = build_record(
+            Level::Info,
+            0,
+            "{} {}",
+            None,
+            1,
+            None,
+            &[le_bytes(TAG_U64, 1)],
         );
+        let line = format_line(&record, LogMetadata::default());
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO 1 <missing arg>",);
     }
 
     #[test]
@@ -1197,10 +1203,7 @@ mod tests {
         // With identity calibration, the raw tick is nanoseconds since epoch.
         let record = build_record(Level::Info, 1_234_567_890, "t", None, 1, None, &[]);
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(
-            line,
-            "1970-01-01T00:00:01.234567890Z  INFO t",
-        );
+        assert_eq!(line, "1970-01-01T00:00:01.234567890Z  INFO t",);
     }
 
     // ---- poll loop tests ----------------------------------------------------
@@ -1304,10 +1307,7 @@ mod tests {
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(
-            recorded[0].0,
-            "1970-01-01T00:00:00.000000000Z  INFO hi",
-        );
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO hi",);
     }
 
     #[test]
@@ -1417,10 +1417,7 @@ mod tests {
         // The dead ring's record must reach the sink before the ring is dropped.
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(
-            recorded[0].0,
-            "1970-01-01T00:00:00.000000000Z  INFO bye",
-        );
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO bye",);
         drop(recorded);
         // And the ring is gone from the drain's local list afterwards.
         assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));

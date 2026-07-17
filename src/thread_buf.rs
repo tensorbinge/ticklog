@@ -137,16 +137,14 @@ where
         if opt.is_none() {
             let ring = Arc::new(RingBuffer::new());
             register_ring(Arc::clone(&ring));
-            let mut thread_name: Option<String> =
-                thread::current().name().map(String::from);
+            let mut thread_name: Option<String> = thread::current().name().map(String::from);
             if let Some(ref name) = thread_name {
                 if name.len() > MAX_THREAD_NAME_LEN {
                     thread_name = Some(name[..MAX_THREAD_NAME_LEN].to_string());
                 }
             }
-            let thread_section_size: u16 = (THREAD_SECTION_BASE_SIZE
-                + thread_name.as_ref().map_or(0, |n| n.len()))
-                as u16;
+            let thread_section_size: u16 =
+                (THREAD_SECTION_BASE_SIZE + thread_name.as_ref().map_or(0, |n| n.len())) as u16;
             *opt = Some(ThreadBuf {
                 ring,
                 thread_id: get_stable_thread_id(),
@@ -220,8 +218,7 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 42,
             thread_name: Some("test-thread".into()),
-            thread_section_size: (THREAD_SECTION_BASE_SIZE
-                + "test-thread".len()) as u16,
+            thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
         };
         assert_eq!(tb.thread_id, 42);
         assert_eq!(tb.thread_name.as_deref(), Some("test-thread"));
