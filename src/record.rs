@@ -173,6 +173,7 @@ mod tests {
     /// Test helper: wraps [`assemble`] with a `&[&dyn Loggable]` slice for
     /// convenience.  Computes sizes from the slice and delegates to the
     /// real (monomorphized) `assemble` via a closure.
+    #[allow(clippy::too_many_arguments)]
     fn check_assemble(
         scratch: &mut Vec<u8>,
         level: Level,
