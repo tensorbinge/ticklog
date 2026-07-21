@@ -140,7 +140,14 @@ where
             let mut thread_name: Option<String> = thread::current().name().map(String::from);
             if let Some(ref name) = thread_name {
                 if name.len() > MAX_THREAD_NAME_LEN {
-                    thread_name = Some(name[..MAX_THREAD_NAME_LEN].to_string());
+                    // Walk back from the byte limit to a valid UTF-8
+                    // boundary so the slice never splits a multi-byte
+                    // character (which would panic).
+                    let mut end = MAX_THREAD_NAME_LEN;
+                    while !name.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    thread_name = Some(name[..end].to_string());
                 }
             }
             let thread_section_size: u16 =
@@ -311,5 +318,39 @@ mod tests {
             Some(None),
             "outer must succeed, inner must be refused"
         );
+    }
+
+    /// A thread name whose byte-length exceeds [`MAX_THREAD_NAME_LEN`] and
+    /// whose 256th byte falls inside a multi-byte UTF-8 character must not
+    /// panic. 255 ASCII `a`s + `é` (2 bytes) = 257 bytes; the byte-index
+    /// slice `[..256]` lands mid-char without `floor_char_boundary`.
+    #[test]
+    fn thread_name_truncation_respects_utf8_boundary() {
+        init_registry();
+        let mut name = "a".repeat(255);
+        name.push('é'); // U+00E9, 2 bytes in UTF-8
+        assert_eq!(name.len(), 257);
+
+        let joined = std::thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                with_thread_buf(|tb| {
+                    if let Some(ref n) = tb.thread_name {
+                        assert!(
+                            n.len() <= MAX_THREAD_NAME_LEN,
+                            "truncated name too long: {}",
+                            n.len()
+                        );
+                        // Must be valid UTF-8.
+                        let _ = n.chars().count();
+                    }
+                    tb.thread_id
+                })
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        assert!(joined.is_some(), "with_thread_buf must succeed");
     }
 }
