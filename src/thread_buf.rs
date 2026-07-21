@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use crate::error::TicklogError;
+use crate::record::THREAD_SECTION_BASE_SIZE;
 use crate::ring::RingBuffer;
 
 /// A thread's local ring buffer and cached metadata.
@@ -19,11 +20,11 @@ pub(crate) struct ThreadBuf {
     /// The ring buffer this thread writes records into.
     pub(crate) ring: Arc<RingBuffer>,
     /// Cached stable thread identifier.
-    #[allow(unused)]
     pub(crate) thread_id: u64,
     /// Cached thread name, if set.
-    #[allow(unused)]
     pub(crate) thread_name: Option<String>,
+    /// Encoded wire size of the thread section for this thread.
+    pub(crate) thread_section_size: u16,
 }
 
 impl Drop for ThreadBuf {
@@ -36,6 +37,10 @@ impl Drop for ThreadBuf {
         // the drain still holds its clone.
     }
 }
+
+/// Maximum length of a cached thread name, in bytes. Names longer than this
+/// are truncated to avoid bloating every record from the thread.
+const MAX_THREAD_NAME_LEN: usize = 256;
 
 /// Extracts a stable `u64` identifier from [`std::thread::ThreadId`] by
 /// parsing its `Debug` representation.
@@ -132,10 +137,26 @@ where
         if opt.is_none() {
             let ring = Arc::new(RingBuffer::new());
             register_ring(Arc::clone(&ring));
+            let mut thread_name: Option<String> = thread::current().name().map(String::from);
+            if let Some(ref name) = thread_name {
+                if name.len() > MAX_THREAD_NAME_LEN {
+                    // Walk back from the byte limit to a valid UTF-8
+                    // boundary so the slice never splits a multi-byte
+                    // character (which would panic).
+                    let mut end = MAX_THREAD_NAME_LEN;
+                    while !name.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    thread_name = Some(name[..end].to_string());
+                }
+            }
+            let thread_section_size: u16 =
+                (THREAD_SECTION_BASE_SIZE + thread_name.as_ref().map_or(0, |n| n.len())) as u16;
             *opt = Some(ThreadBuf {
                 ring,
                 thread_id: get_stable_thread_id(),
-                thread_name: thread::current().name().map(String::from),
+                thread_name,
+                thread_section_size,
             });
         }
 
@@ -204,9 +225,14 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 42,
             thread_name: Some("test-thread".into()),
+            thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
         };
         assert_eq!(tb.thread_id, 42);
         assert_eq!(tb.thread_name.as_deref(), Some("test-thread"));
+        assert_eq!(
+            tb.thread_section_size as usize,
+            THREAD_SECTION_BASE_SIZE + "test-thread".len(),
+        );
         assert!(tb.ring.live.load(Ordering::Relaxed));
     }
 
@@ -217,6 +243,7 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 1,
             thread_name: None,
+            thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
         };
         assert!(ring.live.load(Ordering::Relaxed));
         drop(tb);
@@ -231,6 +258,7 @@ mod tests {
             ring: Arc::clone(&ring),
             thread_id: 1,
             thread_name: None,
+            thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
         };
         drop(tb);
         // Drop set live = false on the shared RingBuffer.
@@ -290,5 +318,39 @@ mod tests {
             Some(None),
             "outer must succeed, inner must be refused"
         );
+    }
+
+    /// A thread name whose byte-length exceeds [`MAX_THREAD_NAME_LEN`] and
+    /// whose 256th byte falls inside a multi-byte UTF-8 character must not
+    /// panic. 255 ASCII `a`s + `é` (2 bytes) = 257 bytes; the byte-index
+    /// slice `[..256]` lands mid-char without `floor_char_boundary`.
+    #[test]
+    fn thread_name_truncation_respects_utf8_boundary() {
+        init_registry();
+        let mut name = "a".repeat(255);
+        name.push('é'); // U+00E9, 2 bytes in UTF-8
+        assert_eq!(name.len(), 257);
+
+        let joined = std::thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                with_thread_buf(|tb| {
+                    if let Some(ref n) = tb.thread_name {
+                        assert!(
+                            n.len() <= MAX_THREAD_NAME_LEN,
+                            "truncated name too long: {}",
+                            n.len()
+                        );
+                        // Must be valid UTF-8.
+                        let _ = n.chars().count();
+                    }
+                    tb.thread_id
+                })
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        assert!(joined.is_some(), "with_thread_buf must succeed");
     }
 }

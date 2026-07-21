@@ -242,14 +242,15 @@ fn fmt_str(data: &[u8], spec: &FormatSpec, buf: &mut Vec<u8>) {
 }
 
 /// Controls which optional fields appear in each formatted line.
-///
-/// Only the source location (`file:line`) is configurable here. Thread and
-/// process sections in a record are parsed but not rendered.
 pub(crate) struct LogMetadata {
     /// Render the source file path.
     pub(crate) file: bool,
     /// Append `:line` after the file path.
     pub(crate) line_number: bool,
+    /// Render the thread name. Default false.
+    pub(crate) thread_name: bool,
+    /// Render `ThreadId(N)`. Default false.
+    pub(crate) thread_id: bool,
 }
 
 impl Default for LogMetadata {
@@ -257,6 +258,8 @@ impl Default for LogMetadata {
         Self {
             file: true,
             line_number: true,
+            thread_name: false,
+            thread_id: false,
         }
     }
 }
@@ -598,6 +601,8 @@ fn decode_and_format(
         let fmt_bytes = unsafe { std::slice::from_raw_parts(fmt_ptr, fmt_len) };
         fmt = std::str::from_utf8(fmt_bytes).unwrap_or("");
     }
+    // Read source and thread sections (defer rendering until both are known).
+    let mut file_line: Option<(&str, u32)> = None;
     if flags & FLAG_SOURCE != 0 {
         // SAFETY: the source section is 14 bytes (u64 ptr + u16 len + u32 line)
         // present when FLAG_SOURCE is set.
@@ -607,25 +612,27 @@ fn decode_and_format(
             let ln = c.read_u32();
             (p, l, ln)
         };
-        if metadata.file {
-            // SAFETY: file_ptr/file_len come from a &'static str (file!()) in
-            // read-only data, valid for the whole process.
-            let file_bytes = unsafe { std::slice::from_raw_parts(file_ptr, file_len) };
-            let file = std::str::from_utf8(file_bytes).unwrap_or("<file>");
-            buf.extend_from_slice(file.as_bytes());
-            if metadata.line_number {
-                buf.push(b':');
-                append_u32(line, buf);
-            }
-            buf.push(b' ');
-        }
+        // SAFETY: file_ptr/file_len come from a &'static str (file!()) in
+        // read-only data, valid for the whole process.
+        let file_bytes = unsafe { std::slice::from_raw_parts(file_ptr, file_len) };
+        let file = std::str::from_utf8(file_bytes).unwrap_or("<file>");
+        file_line = Some((file, line));
     }
+    let mut thread_id: u64 = 0;
+    let mut thread_name: Option<String> = None;
     if flags & FLAG_THREAD != 0 {
         // SAFETY: the thread section is an 8-byte id followed by a
         // length-prefixed name, all within the record slice.
         unsafe {
-            c.skip(8);
-            let _ = c.read_len_prefixed();
+            thread_id = c.read_u64();
+            thread_name = {
+                let (name_bytes, name_len) = c.read_len_prefixed();
+                if name_len > 0 {
+                    std::str::from_utf8(name_bytes).ok().map(String::from)
+                } else {
+                    None
+                }
+            };
         }
     }
     if flags & FLAG_PROCESS != 0 {
@@ -638,6 +645,30 @@ fn decode_and_format(
         // SAFETY: the complex section starts with an 8-byte pointer.
         unsafe {
             c.skip(8);
+        }
+    }
+
+    // Step 4: render optional fields (thread, then source).
+    if metadata.thread_name {
+        if let Some(ref name) = thread_name {
+            buf.extend_from_slice(name.as_bytes());
+            buf.push(b' ');
+        }
+    }
+    if metadata.thread_id {
+        buf.extend_from_slice(b"ThreadId(");
+        append_u64(thread_id, buf);
+        buf.push(b')');
+        buf.push(b' ');
+    }
+    if let Some((file, line)) = file_line {
+        if metadata.file {
+            buf.extend_from_slice(file.as_bytes());
+            if metadata.line_number {
+                buf.push(b':');
+                append_u64(line as u64, buf);
+            }
+            buf.push(b' ');
         }
     }
 
@@ -754,8 +785,9 @@ fn write_unknown_tag(tag: u8, buf: &mut Vec<u8>) {
 }
 
 /// Appends the decimal representation of `v` to `buf`.
-fn append_u32(mut v: u32, buf: &mut Vec<u8>) {
-    let mut tmp = [0u8; 10];
+fn append_u64(mut v: u64, buf: &mut Vec<u8>) {
+    // u64::MAX is 20 digits.
+    let mut tmp = [0u8; 20];
     let mut i = tmp.len();
     loop {
         i -= 1;
@@ -772,7 +804,9 @@ fn append_u32(mut v: u32, buf: &mut Vec<u8>) {
 mod tests {
     use super::*;
     use crate::encode::{TAG_BOOL, TAG_F64, TAG_I64, TAG_U16, TAG_U64};
-    use crate::record::{FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, VERSION};
+    use crate::record::{
+        FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, THREAD_SECTION_BASE_SIZE, VERSION,
+    };
     use std::io;
     use std::sync::{Mutex, OnceLock};
 
@@ -814,9 +848,11 @@ mod tests {
         timestamp: u64,
         fmt: &'static str,
         source: Option<(&'static str, u32)>,
+        thread_id: u64,
+        thread_name: Option<&str>,
         args: &[(u8, Vec<u8>)],
     ) -> Vec<u8> {
-        let mut flags: u16 = FLAG_FORMAT;
+        let mut flags: u16 = FLAG_FORMAT | FLAG_THREAD;
         if source.is_some() {
             flags |= FLAG_SOURCE;
         }
@@ -833,6 +869,12 @@ mod tests {
             payload.extend_from_slice(&(file.len() as u16).to_le_bytes());
             payload.extend_from_slice(&line.to_le_bytes());
         }
+
+        // Thread section.
+        payload.extend_from_slice(&thread_id.to_le_bytes());
+        let name_bytes = thread_name.map_or(&b""[..], |n| n.as_bytes());
+        payload.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        payload.extend_from_slice(name_bytes);
 
         // Arguments.
         payload.push(args.len() as u8);
@@ -1049,18 +1091,22 @@ mod tests {
             0,
             "x={}",
             Some(("a.rs", 7)),
+            1,
+            None,
             &[le_bytes(TAG_U64, 42)],
         );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42");
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",);
     }
 
     #[test]
     fn decode_hides_source_when_disabled() {
-        let record = build_record(Level::Warn, 0, "hi", Some(("a.rs", 7)), &[]);
+        let record = build_record(Level::Warn, 0, "hi", Some(("a.rs", 7)), 1, None, &[]);
         let meta = LogMetadata {
             file: false,
             line_number: false,
+            thread_name: false,
+            thread_id: false,
         };
         let line = format_line(&record, meta);
         assert_eq!(line, "1970-01-01T00:00:00.000000000Z  WARN hi");
@@ -1068,10 +1114,12 @@ mod tests {
 
     #[test]
     fn decode_file_without_line_number() {
-        let record = build_record(Level::Info, 0, "m", Some(("a.rs", 7)), &[]);
+        let record = build_record(Level::Info, 0, "m", Some(("a.rs", 7)), 1, None, &[]);
         let meta = LogMetadata {
             file: true,
             line_number: false,
+            thread_name: false,
+            thread_id: false,
         };
         let line = format_line(&record, meta);
         assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs m");
@@ -1084,36 +1132,54 @@ mod tests {
             0,
             "{} {} {}",
             None,
+            1,
+            None,
             &[le_bytes(TAG_U16, 5), str_arg("ok"), le_bytes(TAG_BOOL, 1)],
         );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  ERROR 5 ok true");
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  ERROR 5 ok true",);
     }
 
     #[test]
     fn decode_escaped_braces() {
-        let record = build_record(Level::Info, 0, "{{{}}}", None, &[le_bytes(TAG_U64, 9)]);
+        let record = build_record(
+            Level::Info,
+            0,
+            "{{{}}}",
+            None,
+            1,
+            None,
+            &[le_bytes(TAG_U64, 9)],
+        );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO {9}");
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO {9}",);
     }
 
     #[test]
     fn decode_unknown_tag_emits_placeholder() {
         // Tag 0x7F is not a known type; the drain must not panic.
-        let record = build_record(Level::Info, 0, "v={}", None, &[(0x7F, vec![0u8])]);
+        let record = build_record(Level::Info, 0, "v={}", None, 1, None, &[(0x7F, vec![0u8])]);
         let line = format_line(&record, LogMetadata::default());
         assert_eq!(
             line,
-            "1970-01-01T00:00:00.000000000Z  INFO v=<unknown tag 0x7F>"
+            "1970-01-01T00:00:00.000000000Z  INFO v=<unknown tag 0x7F>",
         );
     }
 
     #[test]
     fn decode_missing_arg_placeholder() {
         // Two placeholders but only one argument supplied.
-        let record = build_record(Level::Info, 0, "{} {}", None, &[le_bytes(TAG_U64, 1)]);
+        let record = build_record(
+            Level::Info,
+            0,
+            "{} {}",
+            None,
+            1,
+            None,
+            &[le_bytes(TAG_U64, 1)],
+        );
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO 1 <missing arg>");
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO 1 <missing arg>",);
     }
 
     #[test]
@@ -1121,9 +1187,10 @@ mod tests {
         // Corruption: the count byte claims more args than the record actually
         // holds. The decoder must clamp to the tags present rather than panic on
         // a length-mismatched copy, and report the shortfall as a missing arg.
-        let mut record = build_record(Level::Info, 0, "v={}", None, &[]);
-        // The count byte follows the fixed header and the format section.
-        record[HEADER_SIZE + FORMAT_SECTION_SIZE] = 200;
+        let mut record = build_record(Level::Info, 0, "v={}", None, 1, None, &[]);
+        // The count byte follows the fixed header, the format section, and the
+        // thread section.
+        record[HEADER_SIZE + FORMAT_SECTION_SIZE + THREAD_SECTION_BASE_SIZE] = 200;
         let line = format_line(&record, LogMetadata::default());
         assert!(
             line.ends_with("v=<missing arg>"),
@@ -1134,9 +1201,9 @@ mod tests {
     #[test]
     fn decode_timestamp_conversion() {
         // With identity calibration, the raw tick is nanoseconds since epoch.
-        let record = build_record(Level::Info, 1_234_567_890, "t", None, &[]);
+        let record = build_record(Level::Info, 1_234_567_890, "t", None, 1, None, &[]);
         let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:01.234567890Z  INFO t");
+        assert_eq!(line, "1970-01-01T00:00:01.234567890Z  INFO t",);
     }
 
     // ---- poll loop tests ----------------------------------------------------
@@ -1160,6 +1227,8 @@ mod tests {
             0,
             "x={}",
             Some(("a.rs", 7)),
+            1,
+            None,
             &[le_bytes(TAG_U64, 42)],
         );
         place_record(&ring, 0, &record);
@@ -1174,7 +1243,7 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(
             recorded[0].0,
-            "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42"
+            "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",
         );
         assert_eq!(recorded[0].1, Level::Info);
         // tail advanced to head; a second poll finds no work.
@@ -1190,16 +1259,16 @@ mod tests {
 
         // A valid record, then one whose type byte is neither LOG_RECORD nor
         // END_OF_BUFFER (framing corruption), then a second valid record.
-        let r1 = build_record(Level::Info, 0, "first", None, &[]);
+        let r1 = build_record(Level::Info, 0, "first", None, 1, None, &[]);
         place_record(&ring, 0, &r1);
         let off2 = align_up(r1.len() as u64, SLOT_SIZE as u64);
 
-        let mut bad = build_record(Level::Info, 0, "corrupt", None, &[]);
+        let mut bad = build_record(Level::Info, 0, "corrupt", None, 1, None, &[]);
         bad[1] = 0x7F; // record type: not LOG_RECORD (1) or END_OF_BUFFER (2)
         place_record(&ring, off2, &bad);
         let off3 = off2 + align_up(bad.len() as u64, SLOT_SIZE as u64);
 
-        let r2 = build_record(Level::Info, 0, "second", None, &[]);
+        let r2 = build_record(Level::Info, 0, "second", None, 1, None, &[]);
         place_record(&ring, off3, &r2);
 
         drain.rings.push(Arc::clone(&ring));
@@ -1228,7 +1297,7 @@ mod tests {
         eob.resize(SLOT_SIZE, 0); // pad to a full slot
         place_record(&ring, 0, &eob);
 
-        let record = build_record(Level::Info, 0, "hi", None, &[]);
+        let record = build_record(Level::Info, 0, "hi", None, 1, None, &[]);
         place_record(&ring, SLOT_SIZE as u64, &record);
 
         drain.rings.push(Arc::clone(&ring));
@@ -1238,7 +1307,7 @@ mod tests {
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO hi");
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO hi",);
     }
 
     #[test]
@@ -1246,8 +1315,8 @@ mod tests {
         let (mut drain, calls) = capture_drain();
         let ring = Arc::new(RingBuffer::new());
 
-        let r1 = build_record(Level::Info, 0, "a", None, &[]);
-        let r2 = build_record(Level::Warn, 0, "b", None, &[]);
+        let r1 = build_record(Level::Info, 0, "a", None, 1, None, &[]);
+        let r2 = build_record(Level::Warn, 0, "b", None, 1, None, &[]);
         let slot = SLOT_SIZE as u64;
         // Place two records in consecutive slots and set head past both.
         {
@@ -1336,7 +1405,7 @@ mod tests {
         // producer dead (live = false) with the record still unconsumed. The
         // ring is kept out of the shared REGISTRY so the assertion on `calls`
         // cannot be perturbed by a ring another parallel test registered.
-        let record = build_record(Level::Info, 0, "bye", None, &[]);
+        let record = build_record(Level::Info, 0, "bye", None, 1, None, &[]);
         place_record(&ring, 0, &record);
         ring.live.store(false, Ordering::Release);
         drain.rings.push(Arc::clone(&ring));
@@ -1348,7 +1417,7 @@ mod tests {
         // The dead ring's record must reach the sink before the ring is dropped.
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO bye");
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO bye",);
         drop(recorded);
         // And the ring is gone from the drain's local list afterwards.
         assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
@@ -1378,6 +1447,8 @@ mod tests {
             0x1234,
             "hello {}",
             Some(("f.rs", 1)),
+            1,
+            None,
             &[le_bytes(TAG_U64, 42)],
         );
 

@@ -40,28 +40,41 @@ pub fn dispatch(
     file: &'static str,
     line: u32,
     n_args: u8,
-    total_size: usize,
+    args_total: usize,
     policy: Backpressure,
     write_args: impl FnOnce(&mut [u8]),
 ) {
-    // Drop, don't truncate, a record too large for the u16 `total_size` field.
-    //
-    // ticklog targets ultra-low-latency hot paths (e.g. trade execution) where
-    // keeping the producer thread alive and honoring timing guarantees outranks
-    // capturing every byte of a pathological payload. Truncating would tax every
-    // record with a wider string encoding and a branchier decode just to rescue
-    // the rare case of logging a huge buffer; a general-purpose backend that
-    // prizes debugging context over a jitter spike would choose the opposite, but
-    // we do not, by design. The drop is intentionally silent and uncounted.
-    if total_size > record::MAX_RECORD_SIZE {
-        return;
-    }
-
     with_thread_buf(|tb| {
+        let total_size = args_total + tb.thread_section_size as usize;
+        // Drop, don't truncate, a record too large for the u16 `total_size` field.
+        //
+        // ticklog targets ultra-low-latency hot paths (e.g. trade execution) where
+        // keeping the producer thread alive and honoring timing guarantees outranks
+        // capturing every byte of a pathological payload. Truncating would tax every
+        // record with a wider string encoding and a branchier decode just to rescue
+        // the rare case of logging a huge buffer; a general-purpose backend that
+        // prizes debugging context over a jitter spike would choose the opposite, but
+        // we do not, by design. The drop is intentionally silent and uncounted.
+        if total_size > record::MAX_RECORD_SIZE {
+            return;
+        }
+
         if let Some(slot) = tb.ring.reserve(total_size, policy) {
             let timestamp = timestamp::raw_timestamp();
+            let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
             record::assemble(
-                slot.ptr, level, timestamp, fmt, file, line, n_args, total_size, write_args,
+                slot.ptr,
+                level,
+                timestamp,
+                flags,
+                fmt,
+                file,
+                line,
+                tb.thread_id,
+                tb.thread_name.as_deref(),
+                n_args,
+                total_size,
+                write_args,
             );
             tb.ring.publish(slot);
         }
