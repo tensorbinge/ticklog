@@ -87,14 +87,14 @@ Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --cpu <n> --drain-cpu 
 
 `ticklog::configure!` accepts these keys, each optional:
 
-| Key             | Purpose                                                                         | Default                                               |
-| --------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| sink            | Where output goes.                                                              | ConsoleSink on stderr                                 |
-| max_level       | Records above this level are dropped on the calling thread before any encoding. | `Level::Info`                                         |
-| backpressure    | What a logging thread does when its buffer is full.                             | `Backpressure::Drop`                                  |
-| format          | Log-line pattern with `{field}` placeholders.                                   | `{timestamp} [{level:>5}] {file}:{line:04} {message}` |
-| timezone_offset | Seconds east of UTC, applied to timestamp formatting only.                      | 0 (UTC)                                               |
-| drain_affinity  | Pin the background thread to a set of logical CPUs.                             | none                                                  |
+| Key             | Purpose                                                                         | Default                                       |
+| --------------- | ------------------------------------------------------------------------------- | --------------------------------------------- |
+| sink            | Where output goes.                                                              | ConsoleSink on stderr                         |
+| max_level       | Records above this level are dropped on the calling thread before any encoding. | `Level::Info`                                 |
+| backpressure    | What a logging thread does when its buffer is full.                             | `Backpressure::Drop`                          |
+| format          | Log-line pattern with `{field}` placeholders.                                   | `{timestamp} {level} {file}:{line} {message}` |
+| timezone_offset | Seconds east of UTC, applied to timestamp formatting only.                      | 0 (UTC)                                       |
+| drain_affinity  | Pin the background thread to a set of logical CPUs.                             | none                                          |
 
 Example with every key:
 
@@ -105,7 +105,7 @@ let _guard = ticklog::configure! {
     sink: ConsoleSink::stderr(),
     max_level: Level::Trace,
     backpressure: Backpressure::Drop,
-    format: "{timestamp} [{level:>5}] {file}:{line} {message}",
+    format: "{timestamp} [{level:>5}] {file}:{line:04} {message}",
     timezone_offset: 3600,
     drain_affinity: Some(vec![0]),
 }
