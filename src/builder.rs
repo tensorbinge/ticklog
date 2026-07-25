@@ -118,7 +118,7 @@ macro_rules! configure {
     (__pick drain_affinity { }) => { None::<Vec<usize>> };
 
     // __pick format
-    (__pick format { format: $val:literal, $($rest:tt)* }) => { $val };
+    (__pick format { format: $val:expr, $($rest:tt)* }) => { $val };
     (__pick format { $_other:ident : $_val:expr, $($rest:tt)* }) => {
         $crate::configure!(__pick format { $($rest)* })
     };
@@ -132,7 +132,7 @@ pub fn __configure_rt(
     sink: Box<dyn LogSink>,
     timezone_offset: i32,
     drain_affinity: Option<Vec<usize>>,
-    format_str: &'static str,
+    format_str: impl Into<String>,
 ) -> Result<Guard, TicklogError> {
     if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&timezone_offset) {
         return Err(TicklogError::InvalidTimezoneOffset(timezone_offset));
@@ -140,10 +140,11 @@ pub fn __configure_rt(
 
     // Parse the log-line pattern before claiming any global resources, so an
     // invalid pattern rejects cleanly without leaving side-effects.
+    let format_str: String = format_str.into();
     let pattern_str = if format_str.is_empty() {
         DEFAULT_LINE_PATTERN
     } else {
-        format_str
+        &format_str
     };
     let line_pattern = Template::parse(pattern_str).map_err(TicklogError::InvalidFormatPattern)?;
 

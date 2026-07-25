@@ -331,17 +331,7 @@ mod tests {
     #[test]
     fn total_size_matches_buffer_length() {
         let mut buf = Vec::new();
-        check_assemble(
-            &mut buf,
-            Level::Error,
-            0,
-            "{}",
-            "f",
-            1,
-            1,
-            "",
-            &[&"hello"],
-        );
+        check_assemble(&mut buf, Level::Error, 0, "{}", "f", 1, 1, "", &[&"hello"]);
         assert_eq!(read_u16(&buf, 2) as usize, buf.len());
     }
 

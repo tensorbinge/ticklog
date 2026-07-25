@@ -97,10 +97,10 @@ impl Field {
 
 /// One segment of a parsed format string.
 #[derive(Debug, Clone)]
-pub(crate) enum Segment<'a> {
+pub(crate) enum Segment {
     /// Literal text. Adjacent literals are never merged, but the parser
     /// accumulates consecutive literal bytes into a single `Lit` span.
-    Lit(&'a str),
+    Lit(String),
     /// A `{field}` or `{field:spec}` placeholder.
     Place { field: Field, spec: FormatSpec },
 }
@@ -111,11 +111,11 @@ pub(crate) enum Segment<'a> {
 /// segments and dispatching each [`Segment::Place`] by its [`Field`] to a
 /// field-specific formatter.
 #[derive(Debug, Clone)]
-pub(crate) struct Template<'a> {
-    pub segments: Vec<Segment<'a>>,
+pub(crate) struct Template {
+    pub segments: Vec<Segment>,
 }
 
-impl<'a> Template<'a> {
+impl Template {
     /// Parses a format string into a [`Template`].
     ///
     /// Accepts the `std::fmt` syntax: fill, align, `0`, width,
@@ -125,7 +125,7 @@ impl<'a> Template<'a> {
     ///
     /// Rejects: sign flags (`+`, `-`), dynamic width/precision params
     /// (`{0:$}`), unsupported type chars, and trailing garbage.
-    pub(crate) fn parse(fmt: &'a str) -> Result<Self, &'static str> {
+    pub(crate) fn parse(fmt: &str) -> Result<Self, &'static str> {
         let bytes = fmt.as_bytes();
         let mut segments = Vec::new();
         let mut i = 0;
@@ -138,16 +138,16 @@ impl<'a> Template<'a> {
                     if i + 1 < bytes.len() && bytes[i + 1] == b'{' {
                         // Escaped `{{`: emit a single `{` as literal.
                         if lit_start < i {
-                            segments.push(Segment::Lit(&fmt[lit_start..i]));
+                            segments.push(Segment::Lit(fmt[lit_start..i].to_string()));
                         }
-                        segments.push(Segment::Lit("{"));
+                        segments.push(Segment::Lit("{".to_string()));
                         i += 2;
                         lit_start = i;
                         continue;
                     }
                     // Placeholder: flush preceding literal.
                     if lit_start < i {
-                        segments.push(Segment::Lit(&fmt[lit_start..i]));
+                        segments.push(Segment::Lit(fmt[lit_start..i].to_string()));
                     }
                     i += 1; // skip '{'
 
@@ -212,9 +212,9 @@ impl<'a> Template<'a> {
                     if i + 1 < bytes.len() && bytes[i + 1] == b'}' {
                         // Escaped `}}`: emit a single `}` as literal.
                         if lit_start < i {
-                            segments.push(Segment::Lit(&fmt[lit_start..i]));
+                            segments.push(Segment::Lit(fmt[lit_start..i].to_string()));
                         }
-                        segments.push(Segment::Lit("}"));
+                        segments.push(Segment::Lit("}".to_string()));
                         i += 2;
                         lit_start = i;
                         continue;
@@ -229,7 +229,7 @@ impl<'a> Template<'a> {
 
         // Flush trailing literal.
         if lit_start < i {
-            segments.push(Segment::Lit(&fmt[lit_start..i]));
+            segments.push(Segment::Lit(fmt[lit_start..i].to_string()));
         }
 
         Ok(Template { segments })

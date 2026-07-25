@@ -249,7 +249,7 @@ pub(crate) struct Drain {
     shutdown: Arc<AtomicBool>,
     rings: Vec<Arc<RingBuffer>>,
     calibration: Calibration,
-    line_pattern: Template<'static>,
+    line_pattern: Template,
 }
 
 impl Drain {
@@ -261,7 +261,7 @@ impl Drain {
         timezone_offset: i32,
         shutdown: Arc<AtomicBool>,
         calibration: Calibration,
-        line_pattern: Template<'static>,
+        line_pattern: Template,
     ) -> Self {
         Self {
             sink,
@@ -426,7 +426,7 @@ fn drain_ring(
     sink: &mut dyn LogSink,
     timezone_offset: i32,
     calibration: &Calibration,
-    line_pattern: &Template<'_>,
+    line_pattern: &Template,
     buf: &mut Vec<u8>,
 ) -> bool {
     // Own index: Relaxed load; the drain is the sole writer of `tail`.
@@ -530,7 +530,7 @@ fn decode_and_format(
     record: &[u8],
     timezone_offset: i32,
     calibration: &Calibration,
-    line_pattern: &Template<'_>,
+    line_pattern: &Template,
     buf: &mut Vec<u8>,
 ) {
     // SAFETY: `record.as_ptr()` starts a validated record slice of length
@@ -654,7 +654,7 @@ fn decode_and_format(
 /// each [`Segment::Place`] by its field name.
 #[allow(clippy::too_many_arguments)]
 fn render_pattern(
-    template: &Template<'_>,
+    template: &Template,
     ns: u64,
     timezone_offset: i32,
     level: Level,
@@ -897,7 +897,7 @@ mod tests {
         record
     }
 
-    fn default_line_pattern() -> Template<'static> {
+    fn default_line_pattern() -> Template {
         Template::parse(DEFAULT_LINE_PATTERN)
             .expect("invariant: default pattern is a valid format string")
     }
