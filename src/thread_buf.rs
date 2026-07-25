@@ -21,8 +21,8 @@ pub(crate) struct ThreadBuf {
     pub(crate) ring: Arc<RingBuffer>,
     /// Cached stable thread identifier.
     pub(crate) thread_id: u64,
-    /// Cached thread name, if set.
-    pub(crate) thread_name: Option<String>,
+    /// Cached thread name. Falls back to `<unnamed>` when the OS thread has no name.
+    pub(crate) thread_name: String,
     /// Encoded wire size of the thread section for this thread.
     pub(crate) thread_section_size: u16,
 }
@@ -139,21 +139,23 @@ where
         if opt.is_none() {
             let ring = Arc::new(RingBuffer::new());
             register_ring(Arc::clone(&ring));
-            let mut thread_name: Option<String> = thread::current().name().map(String::from);
-            if let Some(ref name) = thread_name {
-                if name.len() > MAX_THREAD_NAME_LEN {
-                    // Walk back from the byte limit to a valid UTF-8
-                    // boundary so the slice never splits a multi-byte
-                    // character (which would panic).
-                    let mut end = MAX_THREAD_NAME_LEN;
-                    while !name.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    thread_name = Some(name[..end].to_string());
+            let thread_name: String = thread::current()
+                .name()
+                .map(String::from)
+                .unwrap_or_else(|| "<unnamed>".to_string());
+            // Truncate names longer than the wire-format limit on a valid
+            // UTF-8 boundary so the slice never splits a multi-byte
+            // character (which would panic).
+            let thread_name = if thread_name.len() > MAX_THREAD_NAME_LEN {
+                let mut end = MAX_THREAD_NAME_LEN;
+                while !thread_name.is_char_boundary(end) {
+                    end -= 1;
                 }
-            }
-            let thread_section_size: u16 =
-                (THREAD_SECTION_BASE_SIZE + thread_name.as_ref().map_or(0, |n| n.len())) as u16;
+                thread_name[..end].to_string()
+            } else {
+                thread_name
+            };
+            let thread_section_size: u16 = (THREAD_SECTION_BASE_SIZE + thread_name.len()) as u16;
             *opt = Some(ThreadBuf {
                 ring,
                 thread_id: get_stable_thread_id(),
@@ -226,11 +228,11 @@ mod tests {
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
             thread_id: 42,
-            thread_name: Some("test-thread".into()),
+            thread_name: "test-thread".into(),
             thread_section_size: (THREAD_SECTION_BASE_SIZE + "test-thread".len()) as u16,
         };
         assert_eq!(tb.thread_id, 42);
-        assert_eq!(tb.thread_name.as_deref(), Some("test-thread"));
+        assert_eq!(&tb.thread_name, "test-thread");
         assert_eq!(
             tb.thread_section_size as usize,
             THREAD_SECTION_BASE_SIZE + "test-thread".len(),
@@ -244,7 +246,7 @@ mod tests {
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
             thread_id: 1,
-            thread_name: None,
+            thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
         };
         assert!(ring.live.load(Ordering::Relaxed));
@@ -259,7 +261,7 @@ mod tests {
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
             thread_id: 1,
-            thread_name: None,
+            thread_name: "t".into(),
             thread_section_size: THREAD_SECTION_BASE_SIZE as u16,
         };
         drop(tb);
@@ -351,15 +353,13 @@ mod tests {
             .name(name)
             .spawn(move || {
                 with_thread_buf(|tb| {
-                    if let Some(ref n) = tb.thread_name {
-                        assert!(
-                            n.len() <= MAX_THREAD_NAME_LEN,
-                            "truncated name too long: {}",
-                            n.len()
-                        );
-                        // Must be valid UTF-8.
-                        let _ = n.chars().count();
-                    }
+                    assert!(
+                        tb.thread_name.len() <= MAX_THREAD_NAME_LEN,
+                        "truncated name too long: {}",
+                        tb.thread_name.len()
+                    );
+                    // Must be valid UTF-8.
+                    let _ = tb.thread_name.chars().count();
                     tb.thread_id
                 })
             })
