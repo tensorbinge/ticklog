@@ -143,19 +143,25 @@ pub(crate) fn assemble(
         put!(timestamp.to_le_bytes());
 
         // Format section
-        put!((fmt.as_ptr() as u64).to_le_bytes());
-        put!((fmt.len() as u16).to_le_bytes());
+        if flags & FLAG_FORMAT != 0 {
+            put!((fmt.as_ptr() as u64).to_le_bytes());
+            put!((fmt.len() as u16).to_le_bytes());
+        }
 
         // Source section
-        put!((file.as_ptr() as u64).to_le_bytes());
-        put!((file.len() as u16).to_le_bytes());
-        put!(line.to_le_bytes());
+        if flags & FLAG_SOURCE != 0 {
+            put!((file.as_ptr() as u64).to_le_bytes());
+            put!((file.len() as u16).to_le_bytes());
+            put!(line.to_le_bytes());
+        }
 
         // Thread section
-        put!(thread_id.to_le_bytes());
-        let name_bytes = thread_name.map_or(&b""[..], |n| n.as_bytes());
-        put!((name_bytes.len() as u16).to_le_bytes());
-        put!(name_bytes);
+        if flags & FLAG_THREAD != 0 {
+            put!(thread_id.to_le_bytes());
+            let name_bytes = thread_name.map_or(&b""[..], |n| n.as_bytes());
+            put!((name_bytes.len() as u16).to_le_bytes());
+            put!(name_bytes);
+        }
 
         // Count byte
         put!([n_args]);
@@ -371,6 +377,43 @@ mod tests {
             None,
             &[&big.as_str()]
         ));
+    }
+
+    #[test]
+    fn flags_control_section_emission() {
+        // When FLAG_SOURCE and FLAG_THREAD are not set, their sections
+        // must be absent from the encoded record. The count byte should
+        // appear immediately after the format section.
+        let mut buf = Vec::new();
+        let flags = FLAG_FORMAT;
+        let total_size = HEADER_SIZE + FORMAT_SECTION_SIZE + COUNT_SIZE;
+
+        buf.reserve(total_size);
+        assemble(
+            buf.as_mut_ptr(),
+            Level::Info,
+            0,
+            flags,
+            "fmt",
+            "f.rs",
+            1,
+            1,
+            Some("main"),
+            0, // n_args
+            total_size,
+            |_buf| { /* no args */ },
+        );
+        // SAFETY: assemble writes exactly total_size bytes.
+        unsafe { buf.set_len(total_size) };
+
+        // Flags in header must only have FLAG_FORMAT.
+        assert_eq!(read_u16(&buf, 5), FLAG_FORMAT);
+
+        // Count byte must be right after the format section, no source
+        // or thread bytes in between.
+        let count_at = HEADER_SIZE + FORMAT_SECTION_SIZE;
+        assert_eq!(buf[count_at], 0); // n_args = 0
+        assert_eq!(buf.len(), count_at + 1);
     }
 
     #[test]
