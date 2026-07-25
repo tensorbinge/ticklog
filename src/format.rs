@@ -64,6 +64,249 @@ impl Default for FormatSpec {
     }
 }
 
+/// Known field identifiers for log-record fields.
+///
+/// Each variant maps to a `{field}` or `{field:spec}` placeholder in a
+/// log-line pattern. Unknown names are rejected at parse time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Field {
+    Timestamp,
+    Level,
+    File,
+    Line,
+    ThreadName,
+    ThreadId,
+    Message,
+}
+
+impl Field {
+    /// Returns the [`Field`] for a name string, or an error for unknown names.
+    fn from_str(name: &str) -> Result<Self, &'static str> {
+        match name {
+            "timestamp" => Ok(Field::Timestamp),
+            "level" => Ok(Field::Level),
+            "file" => Ok(Field::File),
+            "line" => Ok(Field::Line),
+            "thread_name" => Ok(Field::ThreadName),
+            "thread_id" => Ok(Field::ThreadId),
+            "message" => Ok(Field::Message),
+            _ => Err("unknown field name in placeholder"),
+        }
+    }
+}
+
+/// One segment of a parsed format string.
+#[derive(Debug, Clone)]
+pub(crate) enum Segment<'a> {
+    /// Literal text. Adjacent literals are never merged, but the parser
+    /// accumulates consecutive literal bytes into a single `Lit` span.
+    Lit(&'a str),
+    /// A `{field}` or `{field:spec}` placeholder.
+    Place { field: Field, spec: FormatSpec },
+}
+
+/// A format string parsed into [`Segment`]s.
+///
+/// Parsed once via [`Template::parse`], rendered many times by walking the
+/// segments and dispatching each [`Segment::Place`] by its [`Field`] to a
+/// field-specific formatter.
+#[derive(Debug, Clone)]
+pub(crate) struct Template<'a> {
+    pub segments: Vec<Segment<'a>>,
+}
+
+impl<'a> Template<'a> {
+    /// Parses a format string into a [`Template`].
+    ///
+    /// Accepts the `std::fmt` syntax: fill, align, `0`, width,
+    /// `.precision`, `#`, and type chars (`?`, `x`, `X`, `o`, `b`, `e`, `E`).
+    /// `{{` and `}}` are escaped literal braces. Names are field identifiers;
+    /// all-digit names (`{0}`, `{1}`) are rejected as positional params.
+    ///
+    /// Rejects: sign flags (`+`, `-`), dynamic width/precision params
+    /// (`{0:$}`), unsupported type chars, and trailing garbage.
+    pub(crate) fn parse(fmt: &'a str) -> Result<Self, &'static str> {
+        let bytes = fmt.as_bytes();
+        let mut segments = Vec::new();
+        let mut i = 0;
+        let mut lit_start = 0;
+
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+                        // Escaped `{{`: emit a single `{` as literal.
+                        if lit_start < i {
+                            segments.push(Segment::Lit(&fmt[lit_start..i]));
+                        }
+                        segments.push(Segment::Lit("{"));
+                        i += 2;
+                        lit_start = i;
+                        continue;
+                    }
+                    // Placeholder: flush preceding literal.
+                    if lit_start < i {
+                        segments.push(Segment::Lit(&fmt[lit_start..i]));
+                    }
+                    i += 1; // skip '{'
+
+                    // Scan for ':' or '}'.
+                    let name_start = i;
+                    while i < bytes.len() && bytes[i] != b':' && bytes[i] != b'}' {
+                        i += 1;
+                    }
+                    if i >= bytes.len() {
+                        return Err("unclosed '{': missing '}'");
+                    }
+
+                    // Reject positional params.
+                    if name_start < i && is_all_digits(bytes, name_start, i) {
+                        return Err("positional params not supported");
+                    }
+
+                    // Reject unnamed placeholders - every placeholder in a
+                    // pattern must name a known field.
+                    if name_start == i {
+                        return Err("unnamed placeholders are not allowed in pattern");
+                    }
+
+                    let name = &fmt[name_start..i];
+                    let field = Field::from_str(name)?;
+
+                    let spec = if bytes[i] == b':' {
+                        i += 1; // skip ':'
+                        let spec_start = i;
+                        while i < bytes.len() && bytes[i] != b'}' {
+                            i += 1;
+                        }
+                        if i >= bytes.len() {
+                            return Err("unclosed '{': missing '}'");
+                        }
+                        let spec_body = &bytes[spec_start..i];
+                        validate_spec_rt(spec_body)?;
+                        parse_spec_body(spec_body)
+                    } else {
+                        FormatSpec::default()
+                    };
+
+                    segments.push(Segment::Place { field, spec });
+                    i += 1; // skip '}'
+                    lit_start = i;
+                }
+                b'}' => {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'}' {
+                        // Escaped `}}`: emit a single `}` as literal.
+                        if lit_start < i {
+                            segments.push(Segment::Lit(&fmt[lit_start..i]));
+                        }
+                        segments.push(Segment::Lit("}"));
+                        i += 2;
+                        lit_start = i;
+                        continue;
+                    }
+                    return Err("unmatched '}': use '}}' to escape a literal brace");
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        // Flush trailing literal.
+        if lit_start < i {
+            segments.push(Segment::Lit(&fmt[lit_start..i]));
+        }
+
+        Ok(Template { segments })
+    }
+}
+
+/// Runtime validation of a format spec body (the part after `:` in a
+/// placeholder). Mirrors [`parse_spec_const`] but returns `Result` instead of
+/// panicking.
+fn validate_spec_rt(bytes: &[u8]) -> Result<(), &'static str> {
+    let len = bytes.len();
+    let mut i = 0;
+
+    if i >= len {
+        return Ok(());
+    }
+
+    // [fill] [align]
+    if i + 1 < len && is_align_char(bytes[i + 1]) {
+        if !is_valid_fill(bytes[i]) {
+            return Err("invalid fill character");
+        }
+        i += 2;
+    } else if is_align_char(bytes[i]) {
+        i += 1;
+    }
+
+    if i >= len {
+        return Ok(());
+    }
+
+    // ['0']
+    if bytes[i] == b'0' {
+        i += 1;
+    }
+    if i >= len {
+        return Ok(());
+    }
+
+    // [width]
+    if bytes[i] >= b'0' && bytes[i] <= b'9' {
+        while i < len && bytes[i] >= b'0' && bytes[i] <= b'9' {
+            i += 1;
+        }
+    }
+    if i >= len {
+        return Ok(());
+    }
+
+    // ['.' precision]
+    if bytes[i] == b'.' {
+        i += 1;
+        if i >= len || bytes[i] < b'0' || bytes[i] > b'9' {
+            return Err("expected digits after '.'");
+        }
+        while i < len && bytes[i] >= b'0' && bytes[i] <= b'9' {
+            i += 1;
+        }
+    }
+    if i >= len {
+        return Ok(());
+    }
+
+    // ['#']
+    if bytes[i] == b'#' {
+        i += 1;
+    }
+    if i >= len {
+        return Ok(());
+    }
+
+    // [type]
+    match bytes[i] {
+        b'?' | b'x' | b'X' | b'o' | b'b' | b'e' | b'E' => {
+            i += 1;
+        }
+        b'+' | b'-' => {
+            return Err("sign flags not supported");
+        }
+        _ => {
+            return Err("unsupported type character in format spec");
+        }
+    }
+
+    // Reject trailing garbage after type char.
+    if i < len {
+        return Err("trailing characters after format spec");
+    }
+
+    Ok(())
+}
+
 /// Syntactically validates a format string and returns the number of `{}`
 /// placeholders, excluding `{{` / `}}` escapes.
 ///
@@ -269,25 +512,32 @@ const fn is_valid_fill(c: u8) -> bool {
     c != b'+' && c != b'-' && c != b'0' && c != b'#'
 }
 
-/// Parses the content between `{` and `}` into a [`FormatSpec`].
+/// Parses the content between `{` and `}` into a field name and [`FormatSpec`].
 ///
-/// Assumes well-formed input.
+/// `{name}` returns `("name", FormatSpec::default())`.
+/// `{name:spec}` returns `("name", parsed_spec)`.
+/// `{}` returns `("", FormatSpec::default())`.
+/// `{:spec}` returns `("", parsed_spec)`.
+///
+/// Assumes well-formed input (validated at compile time by [`validate_fmt`]).
+pub(crate) fn parse_placeholder(content: &str) -> (&str, FormatSpec) {
+    let bytes = content.as_bytes();
+    let colon = bytes.iter().position(|&b| b == b':');
+    match colon {
+        Some(pos) => {
+            let spec = parse_spec_body(&bytes[pos + 1..]);
+            (&content[..pos], spec)
+        }
+        None => (content, FormatSpec::default()),
+    }
+}
+
+/// Parses the content between `{` and `}` into a [`FormatSpec`], discarding the
+/// optional field name before `:`.
+///
+/// Use [`parse_placeholder`] when the name is needed.
 pub(crate) fn parse_spec(spec_content: &str) -> FormatSpec {
-    let bytes = spec_content.as_bytes();
-    let mut pos = 0;
-
-    // Skip optional cosmetic name before ':'.
-    while pos < bytes.len() && bytes[pos] != b':' {
-        pos += 1;
-    }
-    if pos < bytes.len() && bytes[pos] == b':' {
-        pos += 1; // skip ':'
-    } else {
-        // No ':': the entire content is a cosmetic name; empty spec.
-        return FormatSpec::default();
-    }
-
-    parse_spec_body(&bytes[pos..])
+    parse_placeholder(spec_content).1
 }
 
 /// Parse the format spec after the optional name and colon.

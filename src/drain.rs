@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::encode::{FIXED_SIZES, TAG_COUNT, TAG_STR};
-use crate::format::{self, FormatSpec};
+use crate::format::{self, Field, FormatSpec, Segment, Template};
 use crate::level::Level;
 use crate::record::{
     END_OF_BUFFER, FLAG_COMPLEX, FLAG_FORMAT, FLAG_PROCESS, FLAG_SOURCE, FLAG_THREAD, HEADER_SIZE,
@@ -241,38 +241,15 @@ fn fmt_str(data: &[u8], spec: &FormatSpec, buf: &mut Vec<u8>) {
     format::format_str(&s, spec, buf);
 }
 
-/// Controls which optional fields appear in each formatted line.
-pub(crate) struct LogMetadata {
-    /// Render the source file path.
-    pub(crate) file: bool,
-    /// Append `:line` after the file path.
-    pub(crate) line_number: bool,
-    /// Render the thread name. Default false.
-    pub(crate) thread_name: bool,
-    /// Render `ThreadId(N)`. Default false.
-    pub(crate) thread_id: bool,
-}
-
-impl Default for LogMetadata {
-    fn default() -> Self {
-        Self {
-            file: true,
-            line_number: true,
-            thread_name: false,
-            thread_id: false,
-        }
-    }
-}
-
-/// The drain thread state: the sink, formatting configuration, the shutdown
-/// signal, and the drain's private list of ring buffers.
+/// The drain thread state: the sink, the shutdown signal, and the drain's
+/// private list of ring buffers.
 pub(crate) struct Drain {
     sink: Box<dyn LogSink>,
     timezone_offset: i32,
-    metadata: LogMetadata,
     shutdown: Arc<AtomicBool>,
     rings: Vec<Arc<RingBuffer>>,
     calibration: Calibration,
+    line_pattern: Template<'static>,
 }
 
 impl Drain {
@@ -282,17 +259,17 @@ impl Drain {
     pub(crate) fn new(
         sink: Box<dyn LogSink>,
         timezone_offset: i32,
-        metadata: LogMetadata,
         shutdown: Arc<AtomicBool>,
         calibration: Calibration,
+        line_pattern: Template<'static>,
     ) -> Self {
         Self {
             sink,
             timezone_offset,
-            metadata,
             shutdown,
             rings: Vec::new(),
             calibration,
+            line_pattern,
         }
     }
 
@@ -407,8 +384,8 @@ impl Drain {
                     mask,
                     self.sink.as_mut(),
                     self.timezone_offset,
-                    &self.metadata,
                     &self.calibration,
+                    &self.line_pattern,
                     buf,
                 );
             }
@@ -425,8 +402,8 @@ impl Drain {
                 mask,
                 self.sink.as_mut(),
                 self.timezone_offset,
-                &self.metadata,
                 &self.calibration,
+                &self.line_pattern,
                 buf,
             ) {
                 had_work = true;
@@ -448,8 +425,8 @@ fn drain_ring(
     mask: u64,
     sink: &mut dyn LogSink,
     timezone_offset: i32,
-    metadata: &LogMetadata,
     calibration: &Calibration,
+    line_pattern: &Template<'_>,
     buf: &mut Vec<u8>,
 ) -> bool {
     // Own index: Relaxed load; the drain is the sole writer of `tail`.
@@ -521,7 +498,7 @@ fn drain_ring(
             .unwrap_or(Level::Error);
 
         buf.clear();
-        decode_and_format(record, timezone_offset, metadata, calibration, buf);
+        decode_and_format(record, timezone_offset, calibration, line_pattern, buf);
         if let Err(e) = sink.accept(buf, level) {
             eprintln!("ticklog: sink accept failed: {}", e);
         }
@@ -552,8 +529,8 @@ fn drain_ring(
 fn decode_and_format(
     record: &[u8],
     timezone_offset: i32,
-    metadata: &LogMetadata,
     calibration: &Calibration,
+    line_pattern: &Template<'_>,
     buf: &mut Vec<u8>,
 ) {
     // SAFETY: `record.as_ptr()` starts a validated record slice of length
@@ -574,12 +551,8 @@ fn decode_and_format(
     };
     let level = Level::from_u8(level_byte).unwrap_or(Level::Error);
 
-    // Step 2: timestamp and level prefix.
+    // Step 2: decode the timestamp from raw ticks.
     let ns = ticks_to_ns(timestamp, calibration);
-    format_iso8601(ns, timezone_offset, buf);
-    buf.extend_from_slice(b"  ");
-    buf.extend_from_slice(level.as_str().as_bytes());
-    buf.push(b' ');
 
     // Step 3: flagged sections, in fixed order.
     let mut fmt: &str = "";
@@ -648,47 +621,85 @@ fn decode_and_format(
         }
     }
 
-    // Step 4: render optional fields (thread, then source).
-    if metadata.thread_name {
-        if let Some(ref name) = thread_name {
-            buf.extend_from_slice(name.as_bytes());
-            buf.push(b' ');
-        }
-    }
-    if metadata.thread_id {
-        buf.extend_from_slice(b"ThreadId(");
-        append_u64(thread_id, buf);
-        buf.push(b')');
-        buf.push(b' ');
-    }
-    if let Some((file, line)) = file_line {
-        if metadata.file {
-            buf.extend_from_slice(file.as_bytes());
-            if metadata.line_number {
-                buf.push(b':');
-                append_u64(line as u64, buf);
-            }
-            buf.push(b' ');
-        }
-    }
-
-    // Step 5: interleave the format string with the arguments.
+    // Step 4: read n_args and tags (argument types). The cursor is now
+    // positioned at the start of argument payloads for interleave.
     // SAFETY: n_args (u8) is followed by exactly n_args tag bytes.
     let n_args = unsafe { c.read_u8() } as usize;
     let mut tag_buf = [0u8; 256];
-    // A well-framed record has n_args tags here, but a corrupt frame may hold
-    // fewer: copy exactly the count read_bytes returns (never more than n_args,
-    // so it fits tag_buf) so the two slices are equal-length and the copy cannot
-    // panic. interleave renders any tag that went missing as "<missing arg>".
     // SAFETY: c is bounded to the validated record slice and read_bytes clamps
-    // its length to the bytes remaining, so the read stays in-bounds. Copying
-    // releases the cursor borrow so the argument payloads can be read next.
+    // its length to the bytes remaining, so the read stays in-bounds.
     let n_tags = unsafe {
         let tags = c.read_bytes(n_args);
         tag_buf[..tags.len()].copy_from_slice(tags);
         tags.len()
     };
-    interleave(fmt, &tag_buf[..n_tags], &mut c, buf);
+
+    // Step 5: render the line from the pattern.
+    render_pattern(
+        line_pattern,
+        ns,
+        timezone_offset,
+        level,
+        fmt,
+        file_line,
+        thread_id,
+        thread_name.as_deref(),
+        &tag_buf[..n_tags],
+        &mut c,
+        buf,
+    );
+}
+
+/// Renders one log line by walking the pattern [`Template`] and dispatching
+/// each [`Segment::Place`] by its field name.
+#[allow(clippy::too_many_arguments)]
+fn render_pattern(
+    template: &Template<'_>,
+    ns: u64,
+    timezone_offset: i32,
+    level: Level,
+    fmt: &str,
+    file_line: Option<(&str, u32)>,
+    thread_id: u64,
+    thread_name: Option<&str>,
+    tags: &[u8],
+    c: &mut Cursor,
+    buf: &mut Vec<u8>,
+) {
+    for seg in &template.segments {
+        match seg {
+            Segment::Lit(s) => buf.extend_from_slice(s.as_bytes()),
+            Segment::Place { field, spec } => match field {
+                Field::Timestamp => {
+                    format_iso8601(ns, timezone_offset, buf);
+                }
+                Field::Level => {
+                    format::format_str(level.as_str(), spec, buf);
+                }
+                Field::File => {
+                    if let Some((file, _)) = file_line {
+                        format::format_str(file, spec, buf);
+                    }
+                }
+                Field::Line => {
+                    if let Some((_, line)) = file_line {
+                        format::format_u32(line, spec, buf);
+                    }
+                }
+                Field::ThreadName => {
+                    if let Some(name) = thread_name {
+                        format::format_str(name, spec, buf);
+                    }
+                }
+                Field::ThreadId => {
+                    format::format_u64(thread_id, spec, buf);
+                }
+                Field::Message => {
+                    interleave(fmt, tags, c, buf);
+                }
+            },
+        }
+    }
 }
 
 /// Walks the format string, substituting each `{...}` placeholder with the
@@ -784,25 +795,10 @@ fn write_unknown_tag(tag: u8, buf: &mut Vec<u8>) {
     buf.push(b'>');
 }
 
-/// Appends the decimal representation of `v` to `buf`.
-fn append_u64(mut v: u64, buf: &mut Vec<u8>) {
-    // u64::MAX is 20 digits.
-    let mut tmp = [0u8; 20];
-    let mut i = tmp.len();
-    loop {
-        i -= 1;
-        tmp[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        if v == 0 {
-            break;
-        }
-    }
-    buf.extend_from_slice(&tmp[i..]);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder::DEFAULT_LINE_PATTERN;
     use crate::encode::{TAG_BOOL, TAG_F64, TAG_I64, TAG_U16, TAG_U64};
     use crate::record::{
         FORMAT_SECTION_SIZE, HEADER_SIZE, LOG_RECORD, THREAD_SECTION_BASE_SIZE, VERSION,
@@ -899,9 +895,20 @@ mod tests {
         record
     }
 
-    fn format_line(record: &[u8], metadata: LogMetadata) -> String {
+    fn default_line_pattern() -> Template<'static> {
+        Template::parse(DEFAULT_LINE_PATTERN)
+            .expect("invariant: default pattern is a valid format string")
+    }
+
+    fn format_line(record: &[u8]) -> String {
         let mut buf = Vec::new();
-        decode_and_format(record, 0, &metadata, &identity_calibration(), &mut buf);
+        decode_and_format(
+            record,
+            0,
+            &identity_calibration(),
+            &default_line_pattern(),
+            &mut buf,
+        );
         String::from_utf8(buf).unwrap()
     }
 
@@ -928,9 +935,9 @@ mod tests {
         let drain = Drain::new(
             Box::new(sink),
             0,
-            LogMetadata::default(),
             Arc::new(AtomicBool::new(false)),
             identity_calibration(),
+            default_line_pattern(),
         );
         (drain, calls)
     }
@@ -1095,34 +1102,8 @@ mod tests {
             None,
             &[le_bytes(TAG_U64, 42)],
         );
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",);
-    }
-
-    #[test]
-    fn decode_hides_source_when_disabled() {
-        let record = build_record(Level::Warn, 0, "hi", Some(("a.rs", 7)), 1, None, &[]);
-        let meta = LogMetadata {
-            file: false,
-            line_number: false,
-            thread_name: false,
-            thread_id: false,
-        };
-        let line = format_line(&record, meta);
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  WARN hi");
-    }
-
-    #[test]
-    fn decode_file_without_line_number() {
-        let record = build_record(Level::Info, 0, "m", Some(("a.rs", 7)), 1, None, &[]);
-        let meta = LogMetadata {
-            file: true,
-            line_number: false,
-            thread_name: false,
-            thread_id: false,
-        };
-        let line = format_line(&record, meta);
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO a.rs m");
+        let line = format_line(&record);
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z INFO a.rs:7 x=42",);
     }
 
     #[test]
@@ -1131,13 +1112,13 @@ mod tests {
             Level::Error,
             0,
             "{} {} {}",
-            None,
+            Some(("", 0)),
             1,
             None,
             &[le_bytes(TAG_U16, 5), str_arg("ok"), le_bytes(TAG_BOOL, 1)],
         );
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  ERROR 5 ok true",);
+        let line = format_line(&record);
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z ERROR :0 5 ok true",);
     }
 
     #[test]
@@ -1146,23 +1127,31 @@ mod tests {
             Level::Info,
             0,
             "{{{}}}",
-            None,
+            Some(("", 0)),
             1,
             None,
             &[le_bytes(TAG_U64, 9)],
         );
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO {9}",);
+        let line = format_line(&record);
+        assert_eq!(line, "1970-01-01T00:00:00.000000000Z INFO :0 {9}",);
     }
 
     #[test]
     fn decode_unknown_tag_emits_placeholder() {
         // Tag 0x7F is not a known type; the drain must not panic.
-        let record = build_record(Level::Info, 0, "v={}", None, 1, None, &[(0x7F, vec![0u8])]);
-        let line = format_line(&record, LogMetadata::default());
+        let record = build_record(
+            Level::Info,
+            0,
+            "v={}",
+            Some(("", 0)),
+            1,
+            None,
+            &[(0x7F, vec![0u8])],
+        );
+        let line = format_line(&record);
         assert_eq!(
             line,
-            "1970-01-01T00:00:00.000000000Z  INFO v=<unknown tag 0x7F>",
+            "1970-01-01T00:00:00.000000000Z INFO :0 v=<unknown tag 0x7F>",
         );
     }
 
@@ -1173,13 +1162,16 @@ mod tests {
             Level::Info,
             0,
             "{} {}",
-            None,
+            Some(("", 0)),
             1,
             None,
             &[le_bytes(TAG_U64, 1)],
         );
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:00.000000000Z  INFO 1 <missing arg>",);
+        let line = format_line(&record);
+        assert_eq!(
+            line,
+            "1970-01-01T00:00:00.000000000Z INFO :0 1 <missing arg>",
+        );
     }
 
     #[test]
@@ -1187,11 +1179,11 @@ mod tests {
         // Corruption: the count byte claims more args than the record actually
         // holds. The decoder must clamp to the tags present rather than panic on
         // a length-mismatched copy, and report the shortfall as a missing arg.
-        let mut record = build_record(Level::Info, 0, "v={}", None, 1, None, &[]);
+        let mut record = build_record(Level::Info, 0, "v={}", Some(("", 0)), 1, None, &[]);
         // The count byte follows the fixed header, the format section, and the
         // thread section.
         record[HEADER_SIZE + FORMAT_SECTION_SIZE + THREAD_SECTION_BASE_SIZE] = 200;
-        let line = format_line(&record, LogMetadata::default());
+        let line = format_line(&record);
         assert!(
             line.ends_with("v=<missing arg>"),
             "expected a missing-arg placeholder, got {line:?}"
@@ -1201,9 +1193,9 @@ mod tests {
     #[test]
     fn decode_timestamp_conversion() {
         // With identity calibration, the raw tick is nanoseconds since epoch.
-        let record = build_record(Level::Info, 1_234_567_890, "t", None, 1, None, &[]);
-        let line = format_line(&record, LogMetadata::default());
-        assert_eq!(line, "1970-01-01T00:00:01.234567890Z  INFO t",);
+        let record = build_record(Level::Info, 1_234_567_890, "t", Some(("", 0)), 1, None, &[]);
+        let line = format_line(&record);
+        assert_eq!(line, "1970-01-01T00:00:01.234567890Z INFO :0 t",);
     }
 
     // ---- poll loop tests ----------------------------------------------------
@@ -1243,7 +1235,7 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(
             recorded[0].0,
-            "1970-01-01T00:00:00.000000000Z  INFO a.rs:7 x=42",
+            "1970-01-01T00:00:00.000000000Z INFO a.rs:7 x=42",
         );
         assert_eq!(recorded[0].1, Level::Info);
         // tail advanced to head; a second poll finds no work.
@@ -1297,7 +1289,7 @@ mod tests {
         eob.resize(SLOT_SIZE, 0); // pad to a full slot
         place_record(&ring, 0, &eob);
 
-        let record = build_record(Level::Info, 0, "hi", None, 1, None, &[]);
+        let record = build_record(Level::Info, 0, "hi", Some(("", 0)), 1, None, &[]);
         place_record(&ring, SLOT_SIZE as u64, &record);
 
         drain.rings.push(Arc::clone(&ring));
@@ -1307,7 +1299,7 @@ mod tests {
 
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO hi",);
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z INFO :0 hi",);
     }
 
     #[test]
@@ -1405,7 +1397,7 @@ mod tests {
         // producer dead (live = false) with the record still unconsumed. The
         // ring is kept out of the shared REGISTRY so the assertion on `calls`
         // cannot be perturbed by a ring another parallel test registered.
-        let record = build_record(Level::Info, 0, "bye", None, 1, None, &[]);
+        let record = build_record(Level::Info, 0, "bye", Some(("", 0)), 1, None, &[]);
         place_record(&ring, 0, &record);
         ring.live.store(false, Ordering::Release);
         drain.rings.push(Arc::clone(&ring));
@@ -1417,7 +1409,7 @@ mod tests {
         // The dead ring's record must reach the sink before the ring is dropped.
         let recorded = calls.lock().unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z  INFO bye",);
+        assert_eq!(recorded[0].0, "1970-01-01T00:00:00.000000000Z INFO :0 bye",);
         drop(recorded);
         // And the ring is gone from the drain's local list afterwards.
         assert!(!drain.rings.iter().any(|r| Arc::ptr_eq(r, &ring)));
@@ -1477,14 +1469,22 @@ mod tests {
         let mut sink = CaptureSink {
             calls: Arc::clone(&calls),
         };
-        let metadata = LogMetadata::default();
         let calibration = identity_calibration();
+        let line_pattern = default_line_pattern();
         let mut buf = Vec::new();
 
         barrier.wait();
         let mut guard = 0;
         while calls.lock().unwrap().len() < N {
-            drain_ring(&ring, mask, &mut sink, 0, &metadata, &calibration, &mut buf);
+            drain_ring(
+                &ring,
+                mask,
+                &mut sink,
+                0,
+                &calibration,
+                &line_pattern,
+                &mut buf,
+            );
             guard += 1;
             assert!(
                 guard < 1_000_000,

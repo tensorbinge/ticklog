@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::affinity;
-use crate::drain::{Drain, LogMetadata};
+use crate::drain::Drain;
 use crate::error::TicklogError;
+use crate::format::Template;
 use crate::guard::Guard;
 use crate::sink::LogSink;
 use crate::thread_buf::REGISTRY;
@@ -19,6 +20,9 @@ use crate::timestamp;
 const MIN_TZ_OFFSET: i32 = -43_200;
 /// Maximum valid timezone offset in seconds east of UTC (UTC+14:00).
 const MAX_TZ_OFFSET: i32 = 50_400;
+
+/// Default log-line pattern used when `configure!` does not specify `format:`.
+pub(crate) const DEFAULT_LINE_PATTERN: &str = "{timestamp} {level} {file}:{line} {message}";
 
 /// What a logging thread does when its buffer is full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +38,10 @@ pub enum Backpressure {
 
 /// Initializes the logging system and returns a [`Guard`].
 ///
-/// Every field is optional:
+/// Every field is optional. The `format` key accepts a pattern string with
+/// `{field}` placeholders (`timestamp`, `level`, `file`, `line`,
+/// `thread_name`, `thread_id`, `message`) with `std::fmt`-style format
+/// specs (`:<8`, `:>10`, `:#x`, `.precision`, etc.).
 ///
 /// ```no_run
 /// # use ticklog::{ConsoleSink, Level, Backpressure};
@@ -44,6 +51,7 @@ pub enum Backpressure {
 ///     backpressure: Backpressure::Drop,
 ///     timezone_offset: 3600,
 ///     drain_affinity: Some(vec![0]),
+///     format: "{timestamp} [{level:>5}] {file}:{line} {message}",
 /// }
 /// .unwrap();
 /// ```
@@ -70,6 +78,7 @@ macro_rules! configure {
             Box::new($crate::configure!(__pick sink { $($key : $val ,)* })),
             $crate::configure!(__pick timezone_offset { $($key : $val ,)* }),
             $crate::configure!(__pick drain_affinity { $($key : $val ,)* }),
+            $crate::configure!(__pick format { $($key : $val ,)* }),
         )
     }};
 
@@ -107,6 +116,13 @@ macro_rules! configure {
         $crate::configure!(__pick drain_affinity { $($rest)* })
     };
     (__pick drain_affinity { }) => { None::<Vec<usize>> };
+
+    // __pick format
+    (__pick format { format: $val:literal, $($rest:tt)* }) => { $val };
+    (__pick format { $_other:ident : $_val:expr, $($rest:tt)* }) => {
+        $crate::configure!(__pick format { $($rest)* })
+    };
+    (__pick format { }) => { "" };
 }
 
 /// Runtime portion of [`configure!`]: spawns the drain, calibrates the clock,
@@ -116,10 +132,20 @@ pub fn __configure_rt(
     sink: Box<dyn LogSink>,
     timezone_offset: i32,
     drain_affinity: Option<Vec<usize>>,
+    format_str: &'static str,
 ) -> Result<Guard, TicklogError> {
     if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&timezone_offset) {
         return Err(TicklogError::InvalidTimezoneOffset(timezone_offset));
     }
+
+    // Parse the log-line pattern before claiming any global resources, so an
+    // invalid pattern rejects cleanly without leaving side-effects.
+    let pattern_str = if format_str.is_empty() {
+        DEFAULT_LINE_PATTERN
+    } else {
+        format_str
+    };
+    let line_pattern = Template::parse(pattern_str).map_err(TicklogError::InvalidFormatPattern)?;
 
     REGISTRY
         .set(Mutex::new(Vec::new()))
@@ -131,9 +157,9 @@ pub fn __configure_rt(
     let drain = Drain::new(
         sink,
         timezone_offset,
-        LogMetadata::default(),
         Arc::clone(&shutdown),
         calibration,
+        line_pattern,
     );
 
     let drain_affinity_opt = drain_affinity.clone();
@@ -165,11 +191,11 @@ mod tests {
     #[test]
     fn configure_rt_rejects_out_of_range_timezone_offset() {
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None),
+            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None, ""),
             Err(TicklogError::InvalidTimezoneOffset(50_401))
         ));
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None),
+            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None, ""),
             Err(TicklogError::InvalidTimezoneOffset(-43_201))
         ));
     }
@@ -177,7 +203,15 @@ mod tests {
     #[test]
     fn configure_rt_already_initialized() {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None);
+        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "");
         assert!(matches!(result, Err(TicklogError::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn configure_rt_rejects_invalid_format_pattern() {
+        // We need REGISTRY unset for this to reach the parse step; use an
+        // invalid pattern to trigger the error.
+        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "{unknown_field}");
+        assert!(matches!(result, Err(TicklogError::InvalidFormatPattern(_))));
     }
 }
