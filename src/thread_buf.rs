@@ -42,6 +42,8 @@ impl Drop for ThreadBuf {
 /// are truncated to avoid bloating every record from the thread.
 const MAX_THREAD_NAME_LEN: usize = 256;
 
+const _: () = assert!(THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN <= u16::MAX as usize);
+
 /// Extracts a stable `u64` identifier from [`std::thread::ThreadId`] by
 /// parsing its `Debug` representation.
 ///
@@ -317,6 +319,20 @@ mod tests {
             outer,
             Some(None),
             "outer must succeed, inner must be refused"
+        );
+    }
+
+    #[test]
+    fn thread_section_size_fits_in_u16_at_max_name_length() {
+        // If MAX_THREAD_NAME_LEN were raised above 65525, the `as u16` cast
+        // at init would silently truncate, producing an incorrect wire size.
+        let max_possible = THREAD_SECTION_BASE_SIZE + MAX_THREAD_NAME_LEN;
+        assert!(
+            max_possible <= u16::MAX as usize,
+            "THREAD_SECTION_BASE_SIZE ({}) + MAX_THREAD_NAME_LEN ({}) = {} exceeds u16::MAX",
+            THREAD_SECTION_BASE_SIZE,
+            MAX_THREAD_NAME_LEN,
+            max_possible,
         );
     }
 
