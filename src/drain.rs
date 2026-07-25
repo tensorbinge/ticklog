@@ -672,7 +672,7 @@ fn decode_and_format(
         }
     }
 
-    // Step 4: interleave the format string with the arguments.
+    // Step 5: interleave the format string with the arguments.
     // SAFETY: n_args (u8) is followed by exactly n_args tag bytes.
     let n_args = unsafe { c.read_u8() } as usize;
     let mut tag_buf = [0u8; 256];

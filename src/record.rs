@@ -8,6 +8,7 @@
 //! header:  version u8 | type u8 | total_size u16 | level u8 | flags u16 | pad u8 | timestamp u64
 //! format:  fmt_ptr u64 | fmt_len u16                          (FLAG_FORMAT)
 //! source:  file_ptr u64 | file_len u16 | line u32             (FLAG_SOURCE)
+//! thread:  thread_id u64 | name_len u16 | name bytes          (FLAG_THREAD)
 //! args:    count u8 | tag u8 * count | payload bytes * count
 //! ```
 //!
@@ -51,8 +52,8 @@ pub(crate) const THREAD_SECTION_BASE_SIZE: usize = size_of::<u64>()  // thread_i
     + size_of::<u16>(); // name_len
 
 /// Total size of a record's fixed sections, before any arguments: header,
-/// format, source, and the count byte. The logging macros hardcode this base
-/// (they expand in the caller's crate and cannot read this const); a
+/// format, source, thread, and the count byte. The logging macros hardcode this
+/// base (they expand in the caller's crate and cannot read this const); a
 /// compile-time assertion in `macros` guards the two against drift.
 pub const BASE_RECORD_SIZE: usize =
     HEADER_SIZE + FORMAT_SECTION_SIZE + SOURCE_SECTION_SIZE + COUNT_SIZE;
