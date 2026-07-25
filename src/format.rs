@@ -178,7 +178,14 @@ impl<'a> Template<'a> {
                         if seen_message {
                             return Err("duplicate `{message}` in pattern");
                         }
+                        if bytes[i] == b':' {
+                            return Err("format specs are not accepted on `{message}`");
+                        }
                         seen_message = true;
+                    }
+
+                    if field == Field::Timestamp && bytes[i] == b':' {
+                        return Err("format specs are not accepted on `{timestamp}`");
                     }
 
                     let spec = if bytes[i] == b':' {
@@ -1792,5 +1799,17 @@ mod tests {
     fn template_rejects_duplicate_message() {
         let e = Template::parse("{message} -- {message}").unwrap_err();
         assert_eq!(e, "duplicate `{message}` in pattern");
+    }
+
+    #[test]
+    fn template_rejects_timestamp_format_spec() {
+        let e = Template::parse("{timestamp:.23}").unwrap_err();
+        assert_eq!(e, "format specs are not accepted on `{timestamp}`");
+    }
+
+    #[test]
+    fn template_rejects_message_format_spec() {
+        let e = Template::parse("{message:?}").unwrap_err();
+        assert_eq!(e, "format specs are not accepted on `{message}`");
     }
 }
