@@ -130,6 +130,7 @@ impl<'a> Template<'a> {
         let mut segments = Vec::new();
         let mut i = 0;
         let mut lit_start = 0;
+        let mut seen_message = false;
 
         while i < bytes.len() {
             match bytes[i] {
@@ -172,6 +173,13 @@ impl<'a> Template<'a> {
 
                     let name = &fmt[name_start..i];
                     let field = Field::from_str(name)?;
+
+                    if field == Field::Message {
+                        if seen_message {
+                            return Err("duplicate `{message}` in pattern");
+                        }
+                        seen_message = true;
+                    }
 
                     let spec = if bytes[i] == b':' {
                         i += 1; // skip ':'
@@ -1765,5 +1773,24 @@ mod tests {
     #[should_panic(expected = "unclosed")]
     fn check_fmt_rejects_invalid_syntax() {
         check_fmt("{", 0);
+    }
+
+    #[test]
+    fn template_accepts_single_message() {
+        let t = Template::parse("{message}").unwrap();
+        assert_eq!(t.segments.len(), 1);
+        assert!(matches!(
+            t.segments[0],
+            Segment::Place {
+                field: Field::Message,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn template_rejects_duplicate_message() {
+        let e = Template::parse("{message} -- {message}").unwrap_err();
+        assert_eq!(e, "duplicate `{message}` in pattern");
     }
 }
