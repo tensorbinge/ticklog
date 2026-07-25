@@ -692,7 +692,9 @@ fn render_pattern(
                     }
                 }
                 Field::ThreadId => {
+                    buf.extend_from_slice(b"ThreadId(");
                     format::format_u64(thread_id, spec, buf);
+                    buf.push(b')');
                 }
                 Field::Message => {
                     interleave(fmt, tags, c, buf);
