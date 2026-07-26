@@ -1,0 +1,1 @@
+//! Proc macros for ticklog.

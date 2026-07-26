@@ -175,4 +175,6 @@ pub mod __private {
     pub use crate::format::check_fmt;
     pub use crate::macros::dispatch;
     pub use crate::record::BASE_RECORD_SIZE;
+
+    pub use linkme::distributed_slice;
 }

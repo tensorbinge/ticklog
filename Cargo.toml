@@ -8,7 +8,14 @@ license = "MIT OR Apache-2.0"
 name = "ticklog"
 repository = "https://github.com/tensorbinge/ticklog"
 rust-version = "1.85"
-version = "0.1.1"
+version = "0.2.0"
+
+[workspace]
+members = [".", "ticklog-macros", "cross-lang-bench/rust/ticklog"]
+
+[dependencies]
+linkme = "0.3"
+ticklog-macros = {path = "ticklog-macros", version = "0.2.0"}
 
 [dev-dependencies]
 criterion = {version = "0.5", features = ["html_reports"]}
