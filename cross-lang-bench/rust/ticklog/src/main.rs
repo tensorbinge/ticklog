@@ -5,6 +5,7 @@
 //! `--ns-per-tick` from the pre-calibration step and writes per-configuration
 //! percentiles plus throughput as JSON to `--output`.
 
+use serde::Serialize;
 use std::env;
 use std::fs;
 use std::io;
@@ -12,7 +13,6 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use serde::Serialize;
 use ticklog::{info, Level, LogSink};
 
 // Constants (must match the design doc)
@@ -201,7 +201,6 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
                 let ns = ticks as f64 * ns_per_tick;
                 let per_call_ns = ns / BATCH as f64;
                 latencies.push(per_call_ns);
-
             }
 
             latencies
@@ -229,7 +228,9 @@ fn measure_config(cfg: &Config, workload: Workload, n_threads: usize) -> ConfigR
     let p95 = percentile(&all_latencies, 0.95);
     let p99 = percentile(&all_latencies, 0.99);
     let p999 = percentile(&all_latencies, 0.999);
-    let max = *all_latencies.last().expect("invariant: at least one sample");
+    let max = *all_latencies
+        .last()
+        .expect("invariant: at least one sample");
 
     ConfigResult {
         workload: workload.name().to_string(),
@@ -403,11 +404,7 @@ fn main() {
 
     for &n_threads in &cfg.thread_counts {
         for &wl in Workload::all() {
-            eprintln!(
-                "  {} threads={} ...",
-                wl.name(),
-                n_threads
-            );
+            eprintln!("  {} threads={} ...", wl.name(), n_threads);
             results.push(measure_config(&cfg, wl, n_threads));
         }
     }
