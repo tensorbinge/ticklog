@@ -71,7 +71,7 @@ pub fn dispatch(
                 file,
                 line,
                 tb.thread_id,
-                tb.thread_name.as_deref(),
+                &tb.thread_name,
                 n_args,
                 total_size,
                 write_args,

@@ -88,6 +88,10 @@
 //! - `backpressure`: what a logging thread does when its buffer is full, either
 //!   [`Backpressure::Drop`] (the default, never blocks) or
 //!   [`Backpressure::Block`] (spin until space frees up).
+//! - `format`: log-line pattern with `{field}` placeholders (`timestamp`,
+//!   `level`, `file`, `line`, `thread_name`, `thread_id`, `message`) with
+//!   `std::fmt`-style specs, e.g.
+//!   `"{timestamp} [{level:>5}] {file}:{line:04} {message}"`.
 //! - `timezone_offset`: offset applied when formatting timestamps. Defaults to
 //!   UTC (`0`).
 //! - `drain_affinity`: pin the drain thread to a set of logical CPUs

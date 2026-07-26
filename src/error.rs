@@ -19,6 +19,9 @@ pub enum TicklogError {
     /// A configured timezone offset was outside the valid range of
     /// [-43200, 50400] seconds (UTC-12:00 to UTC+14:00).
     InvalidTimezoneOffset(i32),
+
+    /// Log line pattern could not be parsed.
+    InvalidFormatPattern(&'static str),
 }
 
 impl fmt::Display for TicklogError {
@@ -35,6 +38,7 @@ impl fmt::Display for TicklogError {
                 "invalid timezone offset: {} seconds is outside [-43200, 50400]",
                 secs
             ),
+            Self::InvalidFormatPattern(msg) => write!(f, "invalid format pattern: {}", msg),
         }
     }
 }
@@ -109,5 +113,15 @@ mod tests {
     fn source_none_for_unit_variants() {
         assert!(Error::source(&TicklogError::NotInitialized).is_none());
         assert!(Error::source(&TicklogError::AlreadyInitialized).is_none());
+    }
+
+    #[test]
+    fn display_invalid_format_pattern() {
+        let e = TicklogError::InvalidFormatPattern("unknown field name in placeholder");
+        assert_eq!(
+            e.to_string(),
+            "invalid format pattern: unknown field name in placeholder"
+        );
+        assert!(Error::source(&e).is_none());
     }
 }
