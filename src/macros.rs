@@ -27,8 +27,9 @@ const _: () = assert!(record::BASE_RECORD_SIZE == 41);
 /// The `write_args` closure is monomorphized per unique argument-type
 /// signature: the macro expands each `Loggable::type_tag()` /
 /// `Loggable::encode()` call as a direct (non-vtable) invocation against the
-/// concrete type. `policy` is a compile-time constant from
-/// [`configure!`](crate::configure!) and is branch-folded away.
+/// concrete type. `policy` and `ring_size` are compile-time constants from
+/// [`configure!`](crate::configure!): `policy` is branch-folded away, and a
+/// literal `ring_size` folds into the bitmask immediates after inlining.
 ///
 /// Not part of the public API.
 #[allow(clippy::too_many_arguments)]
@@ -42,6 +43,7 @@ pub fn dispatch(
     n_args: u8,
     args_total: usize,
     policy: Backpressure,
+    ring_size: usize,
     write_args: impl FnOnce(&mut [u8]),
 ) {
     with_thread_buf(|tb| {
@@ -59,7 +61,7 @@ pub fn dispatch(
             return;
         }
 
-        if let Some(slot) = tb.ring.reserve(total_size, policy) {
+        if let Some(slot) = tb.ring.reserve(total_size, policy, ring_size) {
             let timestamp = timestamp::raw_timestamp();
             let flags = record::FLAG_FORMAT | record::FLAG_SOURCE | record::FLAG_THREAD;
             record::assemble(
@@ -101,6 +103,7 @@ macro_rules! __ticklog_log {
             $crate::__private::dispatch(
                 $level, $fmt, file!(), line!(), 0u8, __TOTAL,
                 __ticklog_backpressure!(),
+                __ticklog_ring_size!(),
                 |_buf| {},
             );
         }
@@ -127,6 +130,7 @@ macro_rules! __ticklog_log {
             $crate::__private::dispatch(
                 $level, $fmt, file!(), line!(), __N_ARGS, __total_size,
                 __ticklog_backpressure!(),
+                __ticklog_ring_size!(),
                 |__buf: &mut [u8]| {
                     // Tags fill buf[0..n_args]; payloads follow.
                     let mut __tag: usize = 0;

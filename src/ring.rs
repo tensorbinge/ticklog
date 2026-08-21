@@ -37,7 +37,14 @@ pub(crate) struct Reservation {
 }
 
 /// Ring buffer capacity in bytes. Power of 2 for bitmask indexing.
-pub(crate) const RING_SIZE: usize = 1_048_576; // 1 MB
+pub const DEFAULT_RING_SIZE: usize = 1_048_576; // 1 MB
+
+/// Smallest valid ring size in bytes.
+pub(crate) const MIN_RING_SIZE: usize = (2 * MAX_RECORD_SIZE).next_power_of_two();
+
+// Fail the build if the minimum drifts below the wrap bound it exists to
+// enforce: a ring must always admit a max-size record.
+const _: () = assert!(MIN_RING_SIZE >= 2 * MAX_RECORD_SIZE);
 
 /// Round `n` up to the nearest multiple of `align`.
 /// `align` must be a power of 2.
@@ -117,12 +124,16 @@ unsafe impl Sync for RingBuffer {}
 impl RingBuffer {
     /// Creates a new ring buffer with zero-initialized storage and `live`
     /// set to `true`.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(ring_size: usize) -> Self {
+        debug_assert!(
+            ring_size.is_power_of_two() && ring_size >= MIN_RING_SIZE,
+            "ring_size must be a power of two of at least {MIN_RING_SIZE} bytes"
+        );
         // SAFETY: `UnsafeCell<u8>` is `repr(transparent)` over `u8`, so a
         // zero-filled `Box<[u8]>` and a `Box<[UnsafeCell<u8>]>` of the same
         // length share layout. The cast reinterprets the one heap buffer and
         // preserves the slice length metadata.
-        let bytes = vec![0u8; RING_SIZE].into_boxed_slice();
+        let bytes = vec![0u8; ring_size].into_boxed_slice();
         let data: Box<[UnsafeCell<u8>]> =
             unsafe { Box::from_raw(Box::into_raw(bytes) as *mut [UnsafeCell<u8>]) };
         Self {
@@ -151,10 +162,19 @@ impl RingBuffer {
     /// Single-producer: the calling thread is the sole writer of this ring's
     /// `head` and `tail_cache`.
     #[inline]
-    pub(crate) fn reserve(&self, total_size: usize, policy: Backpressure) -> Option<Reservation> {
+    pub(crate) fn reserve(
+        &self,
+        total_size: usize,
+        policy: Backpressure,
+        ring_size: usize,
+    ) -> Option<Reservation> {
         debug_assert!(
             total_size <= MAX_RECORD_SIZE,
             "invariant: total_size must fit the u16 total_size field"
+        );
+        debug_assert!(
+            ring_size.is_power_of_two() && ring_size >= MIN_RING_SIZE,
+            "invariant: ring_size must be a power of two of at least {MIN_RING_SIZE} bytes"
         );
         let total = total_size as u64;
         let aligned = align_up(total, SLOT_SIZE as u64);
@@ -162,8 +182,8 @@ impl RingBuffer {
         // The producer is the sole writer of `head`, so a Relaxed load of its
         // own position is sufficient.
         let head = self.head.load(Ordering::Relaxed);
-        let offset = (head & (RING_SIZE as u64 - 1)) as usize;
-        let remaining_phys = (RING_SIZE - offset) as u64;
+        let offset = (head & (ring_size as u64 - 1)) as usize;
+        let remaining_phys = (ring_size - offset) as u64;
 
         // If the record would straddle the physical end of the buffer, an
         // EndOfBuffer record first fills the tail and the real record wraps to
@@ -176,7 +196,7 @@ impl RingBuffer {
             aligned
         };
 
-        if !self.try_ensure_capacity(head, needed, policy) {
+        if !self.try_ensure_capacity(head, needed, policy, ring_size) {
             return None;
         }
 
@@ -199,7 +219,7 @@ impl RingBuffer {
         }
 
         // The record lands at the next slot boundary: offset 0 after a wrap.
-        let dst = (next & (RING_SIZE as u64 - 1)) as usize;
+        let dst = (next & (ring_size as u64 - 1)) as usize;
         let new_head = next.wrapping_add(aligned);
 
         Some(Reservation {
@@ -224,13 +244,19 @@ impl RingBuffer {
     ///
     /// Returns `true` once the space is available, or `false` if the record
     /// must be dropped under [`Backpressure::Drop`].
-    fn try_ensure_capacity(&self, head: u64, needed: u64, policy: Backpressure) -> bool {
+    fn try_ensure_capacity(
+        &self,
+        head: u64,
+        needed: u64,
+        policy: Backpressure,
+        ring_size: usize,
+    ) -> bool {
         // Fast path: trust the cached tail. Occupancy after the write is
-        // `(head - tail) + needed`; it fits when that does not exceed RING_SIZE.
+        // `(head - tail) + needed`; it fits when that does not exceed ring_size.
         // SAFETY: `tail_cache` is producer-private; only this thread touches
         // it.
         let cached = unsafe { *self.tail_cache.get() };
-        if head.wrapping_add(needed).wrapping_sub(cached) <= RING_SIZE as u64 {
+        if head.wrapping_add(needed).wrapping_sub(cached) <= ring_size as u64 {
             return true;
         }
 
@@ -241,7 +267,7 @@ impl RingBuffer {
             let tail = self.tail.load(Ordering::Acquire);
             // SAFETY: producer-private, as above.
             unsafe { *self.tail_cache.get() = tail };
-            if head.wrapping_add(needed).wrapping_sub(tail) <= RING_SIZE as u64 {
+            if head.wrapping_add(needed).wrapping_sub(tail) <= ring_size as u64 {
                 return true;
             }
             match policy {
@@ -284,13 +310,33 @@ mod tests {
 
     #[test]
     fn constants_are_power_of_two() {
-        assert!(RING_SIZE.is_power_of_two());
+        assert!(DEFAULT_RING_SIZE.is_power_of_two());
         assert!(SLOT_SIZE.is_power_of_two());
     }
 
     #[test]
+    fn min_ring_size_is_the_smallest_admissible_power_of_two() {
+        assert_eq!(MIN_RING_SIZE, 128 * 1024);
+        assert!(MIN_RING_SIZE.is_power_of_two());
+    }
+
+    #[test]
     fn ring_size_is_1mb() {
-        assert_eq!(RING_SIZE, 1024 * 1024);
+        assert_eq!(DEFAULT_RING_SIZE, 1024 * 1024);
+    }
+
+    #[test]
+    fn new_allocates_configured_size() {
+        let rb = RingBuffer::new(262_144);
+        // SAFETY: single-threaded test; no concurrent writer aliases the ring.
+        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, 262_144) };
+        assert_eq!(data.len(), 262_144);
+    }
+
+    #[test]
+    #[should_panic(expected = "ring_size must be a power of two of at least")]
+    fn new_rejects_invalid_size_in_debug_builds() {
+        let _ = RingBuffer::new(100_000);
     }
 
     #[test]
@@ -306,7 +352,7 @@ mod tests {
 
     #[test]
     fn head_at_offset_zero() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         let base = &rb as *const RingBuffer as usize;
         let head_addr = &rb.head as *const AtomicU64 as usize;
         assert_eq!(head_addr - base, 0);
@@ -314,7 +360,7 @@ mod tests {
 
     #[test]
     fn tail_at_cache_line_offset() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         let base = &rb as *const RingBuffer as usize;
         let tail_addr = &rb.tail as *const AtomicU64 as usize;
         assert_eq!(tail_addr - base, CACHE_LINE_SIZE);
@@ -322,7 +368,7 @@ mod tests {
 
     #[test]
     fn head_and_tail_on_different_cache_lines() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         let head_addr = &rb.head as *const AtomicU64 as usize;
         let tail_addr = &rb.tail as *const AtomicU64 as usize;
         let diff = head_addr.abs_diff(tail_addr);
@@ -331,19 +377,19 @@ mod tests {
 
     #[test]
     fn new_initializes_head_to_zero() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         assert_eq!(rb.head.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]
     fn new_initializes_tail_to_zero() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         assert_eq!(rb.tail.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]
     fn new_initializes_tail_cache_to_zero() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         // SAFETY: this test is single-threaded; no other reference aliases
         // the UnsafeCell.
         let val = unsafe { *rb.tail_cache.get() };
@@ -352,7 +398,7 @@ mod tests {
 
     #[test]
     fn new_initializes_head_cache_to_zero() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         // SAFETY: this test is single-threaded; no other reference aliases
         // the UnsafeCell.
         let val = unsafe { *rb.head_cache.get() };
@@ -361,22 +407,23 @@ mod tests {
 
     #[test]
     fn new_sets_live_to_true() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         assert!(rb.live.load(std::sync::atomic::Ordering::Relaxed));
     }
 
     #[test]
     fn new_zero_initializes_data_region() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         // SAFETY: single-threaded test; no concurrent writer aliases the ring.
-        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
-        assert_eq!(data.len(), RING_SIZE);
+        let data =
+            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, DEFAULT_RING_SIZE) };
+        assert_eq!(data.len(), DEFAULT_RING_SIZE);
         assert!(data.iter().all(|&b| b == 0));
     }
 
     #[test]
     fn pad_fields_are_zeroed() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         assert!(rb._pad_p.iter().all(|&b| b == 0));
         assert!(rb._pad_d.iter().all(|&b| b == 0));
     }
@@ -439,25 +486,25 @@ mod tests {
 
     #[test]
     fn bitmask_is_ring_size_minus_one() {
-        let mask = (RING_SIZE - 1) as u64;
+        let mask = (DEFAULT_RING_SIZE - 1) as u64;
         // For a 1MB ring, mask should be 0xFFFFF (20 bits of 1s).
         assert_eq!(mask, 0xFFFFF);
-        // mask + 1 should be exactly RING_SIZE.
-        assert_eq!(mask + 1, RING_SIZE as u64);
+        // mask + 1 should be exactly DEFAULT_RING_SIZE.
+        assert_eq!(mask + 1, DEFAULT_RING_SIZE as u64);
     }
 
     #[test]
     fn head_wrap_with_bitmask() {
         // Free-running u64 head wraps naturally via bitmask.
-        let head: u64 = RING_SIZE as u64 + 42;
-        let offset = head & (RING_SIZE as u64 - 1);
+        let head: u64 = DEFAULT_RING_SIZE as u64 + 42;
+        let offset = head & (DEFAULT_RING_SIZE as u64 - 1);
         assert_eq!(offset, 42);
     }
 
     #[test]
     fn head_at_exact_capacity_wraps_to_zero() {
-        let head: u64 = RING_SIZE as u64;
-        let offset = head & (RING_SIZE as u64 - 1);
+        let head: u64 = DEFAULT_RING_SIZE as u64;
+        let offset = head & (DEFAULT_RING_SIZE as u64 - 1);
         assert_eq!(offset, 0);
     }
 
@@ -475,10 +522,12 @@ mod tests {
 
     #[test]
     fn write_record_places_record_and_advances_head() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         let record = [0xABu8; 40];
         let len = record.len();
-        let slot = rb.reserve(len, Backpressure::Drop).unwrap();
+        let slot = rb
+            .reserve(len, Backpressure::Drop, DEFAULT_RING_SIZE)
+            .unwrap();
         unsafe {
             std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len);
         }
@@ -489,16 +538,17 @@ mod tests {
         assert_eq!(rb.head.load(Ordering::Relaxed), aligned);
 
         // The bytes landed at offset 0.
-        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data =
+            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, DEFAULT_RING_SIZE) };
         assert_eq!(&data[..40], &record[..]);
     }
 
     #[test]
     fn write_record_wraps_with_eob_at_ring_end() {
-        let rb = RingBuffer::new();
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
         let slot = SLOT_SIZE as u64;
         // Position the producer one slot from the physical end, ring empty.
-        let start = RING_SIZE as u64 - slot;
+        let start = DEFAULT_RING_SIZE as u64 - slot;
         rb.head.store(start, Ordering::Relaxed);
         rb.tail.store(start, Ordering::Relaxed);
         unsafe { *rb.tail_cache.get() = start };
@@ -508,7 +558,9 @@ mod tests {
         let record = vec![0xCDu8; slot as usize + 1];
         let aligned = align_up(record.len() as u64, slot); // == 2 * slot
         let len = record.len();
-        let res = rb.reserve(len, Backpressure::Drop).unwrap();
+        let res = rb
+            .reserve(len, Backpressure::Drop, DEFAULT_RING_SIZE)
+            .unwrap();
         unsafe {
             std::ptr::copy_nonoverlapping(record.as_ptr(), res.ptr, len);
         }
@@ -517,9 +569,10 @@ mod tests {
         // Head advanced past the EOB filler (one slot) and the record.
         assert_eq!(rb.head.load(Ordering::Relaxed), start + slot + aligned);
 
-        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        let data =
+            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, DEFAULT_RING_SIZE) };
         // EOB header sits at the old offset and spans exactly one slot.
-        let eob = (start & (RING_SIZE as u64 - 1)) as usize;
+        let eob = (start & (DEFAULT_RING_SIZE as u64 - 1)) as usize;
         assert_eq!(data[eob], VERSION);
         assert_eq!(data[eob + 1], END_OF_BUFFER);
         assert_eq!(
@@ -532,23 +585,26 @@ mod tests {
 
     #[test]
     fn write_record_drops_when_full_under_drop_policy() {
-        let rb = RingBuffer::new();
-        // Ring completely full: head is RING_SIZE ahead of tail.
-        rb.head.store(RING_SIZE as u64, Ordering::Relaxed);
+        let rb = RingBuffer::new(DEFAULT_RING_SIZE);
+        // Ring completely full: head is DEFAULT_RING_SIZE ahead of tail.
+        rb.head.store(DEFAULT_RING_SIZE as u64, Ordering::Relaxed);
         rb.tail.store(0, Ordering::Relaxed);
         unsafe { *rb.tail_cache.get() = 0 };
 
         let record = [0u8; 40];
-        assert!(rb.reserve(record.len(), Backpressure::Drop).is_none());
+        assert!(
+            rb.reserve(record.len(), Backpressure::Drop, DEFAULT_RING_SIZE)
+                .is_none()
+        );
         // Head is unchanged: nothing was written.
-        assert_eq!(rb.head.load(Ordering::Relaxed), RING_SIZE as u64);
+        assert_eq!(rb.head.load(Ordering::Relaxed), DEFAULT_RING_SIZE as u64);
     }
 
     #[test]
     fn write_record_block_unblocks_when_drain_frees_space() {
-        let rb = std::sync::Arc::new(RingBuffer::new());
+        let rb = std::sync::Arc::new(RingBuffer::new(DEFAULT_RING_SIZE));
         // Start completely full.
-        rb.head.store(RING_SIZE as u64, Ordering::Relaxed);
+        rb.head.store(DEFAULT_RING_SIZE as u64, Ordering::Relaxed);
         rb.tail.store(0, Ordering::Relaxed);
         unsafe { *rb.tail_cache.get() = 0 };
 
@@ -556,13 +612,17 @@ mod tests {
         let drain = std::sync::Arc::clone(&rb);
         let handle = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(20));
-            drain.tail.store(RING_SIZE as u64, Ordering::Release);
+            drain
+                .tail
+                .store(DEFAULT_RING_SIZE as u64, Ordering::Release);
         });
 
         let record = [0x5Au8; 40];
         // Blocks until the drain thread frees space, then writes.
         let len = record.len();
-        let slot = rb.reserve(len, Backpressure::Block).unwrap();
+        let slot = rb
+            .reserve(len, Backpressure::Block, DEFAULT_RING_SIZE)
+            .unwrap();
         unsafe {
             std::ptr::copy_nonoverlapping(record.as_ptr(), slot.ptr, len);
         }
@@ -570,8 +630,12 @@ mod tests {
         handle.join().unwrap();
 
         let aligned = align_up(40, SLOT_SIZE as u64);
-        assert_eq!(rb.head.load(Ordering::Relaxed), RING_SIZE as u64 + aligned);
-        let data = unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, RING_SIZE) };
+        assert_eq!(
+            rb.head.load(Ordering::Relaxed),
+            DEFAULT_RING_SIZE as u64 + aligned
+        );
+        let data =
+            unsafe { std::slice::from_raw_parts(rb.data.as_ptr() as *const u8, DEFAULT_RING_SIZE) };
         assert_eq!(&data[..40], &record[..]);
     }
 }

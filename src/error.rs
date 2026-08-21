@@ -1,5 +1,7 @@
 use std::{error::Error, fmt, io};
 
+use crate::ring::MIN_RING_SIZE;
+
 /// Errors returned by ticklog operations.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -22,6 +24,10 @@ pub enum TicklogError {
 
     /// Log line pattern could not be parsed.
     InvalidFormatPattern(&'static str),
+
+    /// A configured ring size was not a power of two, or smaller than the
+    /// 128 KiB minimum.
+    InvalidRingSize(usize),
 }
 
 impl fmt::Display for TicklogError {
@@ -39,6 +45,11 @@ impl fmt::Display for TicklogError {
                 secs
             ),
             Self::InvalidFormatPattern(msg) => write!(f, "invalid format pattern: {}", msg),
+            Self::InvalidRingSize(bytes) => write!(
+                f,
+                "invalid ring size: {bytes} bytes; must be a power of two of at least {}",
+                MIN_RING_SIZE
+            ),
         }
     }
 }
@@ -121,6 +132,16 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "invalid format pattern: unknown field name in placeholder"
+        );
+        assert!(Error::source(&e).is_none());
+    }
+
+    #[test]
+    fn display_invalid_ring_size() {
+        let e = TicklogError::InvalidRingSize(100_000);
+        assert_eq!(
+            e.to_string(),
+            "invalid ring size: 100000 bytes; must be a power of two of at least 131072"
         );
         assert!(Error::source(&e).is_none());
     }

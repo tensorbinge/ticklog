@@ -137,7 +137,7 @@ where
         let opt = unsafe { &mut *slot.buf.get() };
 
         if opt.is_none() {
-            let ring = Arc::new(RingBuffer::new());
+            let ring = Arc::new(RingBuffer::new(ring_size()));
             register_ring(Arc::clone(&ring));
             let thread_name: String = thread::current()
                 .name()
@@ -176,6 +176,27 @@ where
 /// here during lazy init or [`warm_up`].
 pub(crate) static REGISTRY: OnceLock<Mutex<Vec<Arc<RingBuffer>>>> = OnceLock::new();
 
+/// Per-process configured ring size, set once by `configure!` before any
+/// ring is created and read once per thread during lazy init or `warm_up`.
+pub(crate) static RING_SIZE: OnceLock<usize> = OnceLock::new();
+
+/// Stores the configured ring size. Called by `__configure_rt` before the
+/// registry is claimed. A second call is a no-op.
+pub(crate) fn set_ring_size(ring_size: usize) {
+    let _ = RING_SIZE.set(ring_size);
+}
+
+/// Returns the configured ring size.
+///
+/// # Panics
+///
+/// Panics if `configure!` has not run.
+pub(crate) fn ring_size() -> usize {
+    *RING_SIZE
+        .get()
+        .expect("invariant: ring size not configured; call ticklog::configure! before logging")
+}
+
 /// Registers a ring buffer with the global [`REGISTRY`].
 ///
 /// # Panics
@@ -211,9 +232,11 @@ pub fn warm_up() -> Result<(), TicklogError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ring::DEFAULT_RING_SIZE;
 
     fn init_registry() {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
+        set_ring_size(DEFAULT_RING_SIZE);
     }
 
     #[test]
@@ -224,7 +247,7 @@ mod tests {
 
     #[test]
     fn thread_buf_holds_ring_and_metadata() {
-        let ring = Arc::new(RingBuffer::new());
+        let ring = Arc::new(RingBuffer::new(DEFAULT_RING_SIZE));
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
             thread_id: 42,
@@ -242,7 +265,7 @@ mod tests {
 
     #[test]
     fn drop_sets_live_to_false() {
-        let ring = Arc::new(RingBuffer::new());
+        let ring = Arc::new(RingBuffer::new(DEFAULT_RING_SIZE));
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
             thread_id: 1,
@@ -256,7 +279,7 @@ mod tests {
 
     #[test]
     fn buffer_survives_thread_buf_drop_when_other_arcs_exist() {
-        let ring = Arc::new(RingBuffer::new());
+        let ring = Arc::new(RingBuffer::new(DEFAULT_RING_SIZE));
         let other = Arc::clone(&ring);
         let tb = ThreadBuf {
             ring: Arc::clone(&ring),
@@ -292,7 +315,7 @@ mod tests {
         init_registry();
         let mut rings = REGISTRY.get().unwrap().lock().unwrap();
         let count_before = rings.len();
-        rings.push(Arc::new(RingBuffer::new()));
+        rings.push(Arc::new(RingBuffer::new(DEFAULT_RING_SIZE)));
         assert_eq!(rings.len(), count_before + 1);
     }
 

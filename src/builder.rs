@@ -12,8 +12,9 @@ use crate::drain::Drain;
 use crate::error::TicklogError;
 use crate::format::Template;
 use crate::guard::Guard;
+use crate::ring::MIN_RING_SIZE;
 use crate::sink::LogSink;
-use crate::thread_buf::REGISTRY;
+use crate::thread_buf::{REGISTRY, set_ring_size};
 use crate::timestamp;
 
 /// Minimum valid timezone offset in seconds east of UTC (UTC-12:00).
@@ -36,6 +37,24 @@ pub enum Backpressure {
     Block,
 }
 
+/// Rejects ring sizes that are not a power of two or cannot admit a
+/// max-size record. See [`crate::ring::MIN_RING_SIZE`] for the bound.
+fn validate_ring_size(ring_size: usize) -> Result<(), TicklogError> {
+    if !ring_size.is_power_of_two() || ring_size < MIN_RING_SIZE {
+        return Err(TicklogError::InvalidRingSize(ring_size));
+    }
+    Ok(())
+}
+
+/// Rejects timezone offsets outside the valid range of
+/// [-43200, 50400] seconds (UTC-12:00 to UTC+14:00).
+fn validate_timezone_offset(offset: i32) -> Result<(), TicklogError> {
+    if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&offset) {
+        return Err(TicklogError::InvalidTimezoneOffset(offset));
+    }
+    Ok(())
+}
+
 /// Initializes the logging system and returns a [`Guard`].
 ///
 /// Every field is optional. The `format` key accepts a pattern string with
@@ -49,6 +68,7 @@ pub enum Backpressure {
 ///     sink: ConsoleSink::stderr(),
 ///     max_level: Level::Trace,
 ///     backpressure: Backpressure::Drop,
+///     ring_size: 4 * 1024 * 1024,
 ///     timezone_offset: 3600,
 ///     drain_affinity: Some(vec![0]),
 ///     format: "{timestamp} [{level:>5}] {file}:{line} {message}",
@@ -74,11 +94,17 @@ macro_rules! configure {
         macro_rules! __ticklog_backpressure {
             () => { $crate::configure!(__pick backpressure { $($key : $val ,)* }) };
         }
+        #[allow(non_local_definitions)]
+        #[macro_export]
+        macro_rules! __ticklog_ring_size {
+            () => { $crate::configure!(__pick ring_size { $($key : $val ,)* }) };
+        }
         $crate::__private::__configure_rt(
             Box::new($crate::configure!(__pick sink { $($key : $val ,)* })),
             $crate::configure!(__pick timezone_offset { $($key : $val ,)* }),
             $crate::configure!(__pick drain_affinity { $($key : $val ,)* }),
             $crate::configure!(__pick format { $($key : $val ,)* }),
+            $crate::configure!(__pick ring_size { $($key : $val ,)* }),
         )
     }};
 
@@ -95,6 +121,15 @@ macro_rules! configure {
         $crate::configure!(__pick backpressure { $($rest)* })
     };
     (__pick backpressure { }) => { $crate::Backpressure::Drop };
+
+    // __pick ring_size
+    // The picked value is wrapped in a const block so a non-constant
+    // expression (e.g. a runtime variable) is a compile error.
+    (__pick ring_size { ring_size: $val:expr, $($rest:tt)* }) => { const { $val } };
+    (__pick ring_size { $_other:ident : $_val:expr, $($rest:tt)* }) => {
+        $crate::configure!(__pick ring_size { $($rest)* })
+    };
+    (__pick ring_size { }) => { $crate::__private::DEFAULT_RING_SIZE };
 
     // __pick sink
     (__pick sink { sink: $val:expr, $($rest:tt)* }) => { $val };
@@ -133,10 +168,10 @@ pub fn __configure_rt(
     timezone_offset: i32,
     drain_affinity: Option<Vec<usize>>,
     format_str: impl Into<String>,
+    ring_size: usize,
 ) -> Result<Guard, TicklogError> {
-    if !(MIN_TZ_OFFSET..=MAX_TZ_OFFSET).contains(&timezone_offset) {
-        return Err(TicklogError::InvalidTimezoneOffset(timezone_offset));
-    }
+    validate_timezone_offset(timezone_offset)?;
+    validate_ring_size(ring_size)?;
 
     // Parse the log-line pattern before claiming any global resources, so an
     // invalid pattern rejects cleanly without leaving side-effects.
@@ -148,6 +183,10 @@ pub fn __configure_rt(
     };
     let line_pattern = Template::parse(pattern_str).map_err(TicklogError::InvalidFormatPattern)?;
 
+    // The configured size is claimed alongside the registry: threads cannot
+    // create rings before the registry exists, so every ring sees the value
+    // set here.
+    set_ring_size(ring_size);
     REGISTRY
         .set(Mutex::new(Vec::new()))
         .map_err(|_| TicklogError::AlreadyInitialized)?;
@@ -161,6 +200,7 @@ pub fn __configure_rt(
         Arc::clone(&shutdown),
         calibration,
         line_pattern,
+        ring_size,
     );
 
     let drain_affinity_opt = drain_affinity.clone();
@@ -190,29 +230,102 @@ mod tests {
     }
 
     #[test]
-    fn configure_rt_rejects_out_of_range_timezone_offset() {
+    fn validate_ring_size_accepts_min_and_larger_powers_of_two() {
+        assert!(validate_ring_size(crate::ring::MIN_RING_SIZE).is_ok());
+        assert!(validate_ring_size(1_048_576).is_ok());
+        assert!(validate_ring_size(64 * 1024 * 1024).is_ok());
+    }
+
+    #[test]
+    fn validate_ring_size_rejects_non_power_of_two() {
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), 50_401, None, ""),
+            validate_ring_size(100_000),
+            Err(TicklogError::InvalidRingSize(100_000))
+        ));
+        assert!(matches!(
+            validate_ring_size(0),
+            Err(TicklogError::InvalidRingSize(0))
+        ));
+    }
+
+    #[test]
+    fn validate_ring_size_rejects_below_min() {
+        assert!(matches!(
+            validate_ring_size(65_536),
+            Err(TicklogError::InvalidRingSize(65_536))
+        ));
+    }
+
+    #[test]
+    fn validate_timezone_offset_accepts_bounds_and_inside() {
+        assert!(validate_timezone_offset(MIN_TZ_OFFSET).is_ok());
+        assert!(validate_timezone_offset(MAX_TZ_OFFSET).is_ok());
+        assert!(validate_timezone_offset(0).is_ok());
+        assert!(validate_timezone_offset(3_600).is_ok());
+    }
+
+    #[test]
+    fn validate_timezone_offset_rejects_out_of_range() {
+        assert!(matches!(
+            validate_timezone_offset(50_401),
             Err(TicklogError::InvalidTimezoneOffset(50_401))
         ));
         assert!(matches!(
-            __configure_rt(Box::new(ConsoleSink::stderr()), -43_201, None, ""),
+            validate_timezone_offset(-43_201),
             Err(TicklogError::InvalidTimezoneOffset(-43_201))
+        ));
+    }
+
+    #[test]
+    fn configure_rt_rejects_out_of_range_timezone_offset() {
+        // Boundary cases live in the `validate_timezone_offset` unit tests;
+        // this checks the wiring through `__configure_rt` once.
+        let result = __configure_rt(
+            Box::new(ConsoleSink::stderr()),
+            50_401,
+            None,
+            "",
+            crate::ring::DEFAULT_RING_SIZE,
+        );
+        assert!(matches!(
+            result,
+            Err(TicklogError::InvalidTimezoneOffset(50_401))
         ));
     }
 
     #[test]
     fn configure_rt_already_initialized() {
         let _ = REGISTRY.set(Mutex::new(Vec::new()));
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "");
+        let result = __configure_rt(
+            Box::new(ConsoleSink::stderr()),
+            0,
+            None,
+            "",
+            crate::ring::DEFAULT_RING_SIZE,
+        );
         assert!(matches!(result, Err(TicklogError::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn configure_rt_rejects_invalid_ring_size() {
+        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "", 100_000);
+        assert!(matches!(
+            result,
+            Err(TicklogError::InvalidRingSize(100_000))
+        ));
     }
 
     #[test]
     fn configure_rt_rejects_invalid_format_pattern() {
         // We need REGISTRY unset for this to reach the parse step; use an
         // invalid pattern to trigger the error.
-        let result = __configure_rt(Box::new(ConsoleSink::stderr()), 0, None, "{unknown_field}");
+        let result = __configure_rt(
+            Box::new(ConsoleSink::stderr()),
+            0,
+            None,
+            "{unknown_field}",
+            crate::ring::DEFAULT_RING_SIZE,
+        );
         assert!(matches!(result, Err(TicklogError::InvalidFormatPattern(_))));
     }
 }

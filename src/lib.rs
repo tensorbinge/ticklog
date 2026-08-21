@@ -88,6 +88,9 @@
 //! - `backpressure`: what a logging thread does when its buffer is full, either
 //!   [`Backpressure::Drop`] (the default, never blocks) or
 //!   [`Backpressure::Block`] (spin until space frees up).
+//! - `ring_size`: bytes of buffer allocated per logging thread. Must be a
+//!   power of two of at least 128 KiB, and a compile-time constant. Defaults
+//!   to 1 MiB (1,048,576).
 //! - `format`: log-line pattern with `{field}` placeholders (`timestamp`,
 //!   `level`, `file`, `line`, `thread_name`, `thread_id`, `message`) with
 //!   `std::fmt`-style specs, e.g.
@@ -175,4 +178,5 @@ pub mod __private {
     pub use crate::format::check_fmt;
     pub use crate::macros::dispatch;
     pub use crate::record::BASE_RECORD_SIZE;
+    pub use crate::ring::DEFAULT_RING_SIZE;
 }
