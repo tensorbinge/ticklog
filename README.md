@@ -92,6 +92,7 @@ Reproduce: `cd cross-lang-bench && ./setup.sh && ./run.sh --cpu <n> --drain-cpu 
 | sink            | Where output goes.                                                              | ConsoleSink on stderr                         |
 | max_level       | Records above this level are dropped on the calling thread before any encoding. | `Level::Info`                                 |
 | backpressure    | What a logging thread does when its buffer is full.                             | `Backpressure::Drop`                          |
+| ring_size       | Per-thread buffer bytes. Power of two, at least 128 KiB.                        | 1,048,576 (1 MiB)                             |
 | format          | Log-line pattern with `{field}` placeholders.                                   | `{timestamp} {level} {file}:{line} {message}` |
 | timezone_offset | Seconds east of UTC, applied to timestamp formatting only.                      | 0 (UTC)                                       |
 | drain_affinity  | Pin the background thread to a set of logical CPUs.                             | none                                          |
