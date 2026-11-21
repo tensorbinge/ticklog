@@ -6,30 +6,17 @@
 //! `Backpressure::Block` guarantees no record is dropped, so each thread's
 //! sequence must arrive as the contiguous run `0..RECORDS_PER_THREAD`.
 
+mod common;
+
 use std::collections::HashMap;
-use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use ticklog::{Backpressure, Level, LogSink, info};
+use common::CaptureSink;
+use ticklog::{Backpressure, Level, info};
 
 const THREADS: usize = 8;
 const RECORDS_PER_THREAD: usize = 1_000;
-
-/// Records every accepted line for post-shutdown assertions.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
 
 /// Parses the `(worker, seq)` pair from a line ending in `worker=<w> seq=<s>`.
 fn parse_worker_seq(line: &str) -> Option<(usize, usize)> {

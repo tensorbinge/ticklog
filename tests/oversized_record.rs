@@ -12,24 +12,12 @@
 //! With the gate, the oversized record is dropped and the following record
 //! arrives intact. This test proves the sentinel survives.
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
-use ticklog::{Level, LogSink, info};
-
-/// A sink that records every accepted line, for assertions after shutdown.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> std::io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
+use common::CaptureSink;
+use ticklog::{Level, info};
 
 #[test]
 fn oversized_record_is_dropped_and_next_record_survives() {

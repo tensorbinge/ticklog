@@ -7,26 +7,13 @@
 //! last drain before releasing it (drain.rs), and the guard's shutdown triggers
 //! that final pass -- so a short-lived worker never loses records.
 
-use std::io;
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use ticklog::{Level, LogSink, info};
-
-/// Records every accepted line for post-shutdown assertions.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
+use common::CaptureSink;
+use ticklog::{Level, info};
 
 fn any_line_contains(lines: &[String], needle: &str) -> bool {
     lines.iter().any(|line| line.contains(needle))

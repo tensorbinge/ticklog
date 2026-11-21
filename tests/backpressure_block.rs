@@ -7,29 +7,16 @@
 //! the ring's capacity and asserts every record arrives, in order -- the
 //! property that distinguishes Block from Drop.
 
-use std::io;
+mod common;
+
 use std::sync::{Arc, Mutex};
 
-use ticklog::{Backpressure, Level, LogSink, info};
+use common::CaptureSink;
+use ticklog::{Backpressure, Level, info};
 
 /// Several times a 1 MB ring's capacity, so the producer must block and wait
 /// for the drain repeatedly during the run.
 const PRODUCED: usize = 50_000;
-
-/// Records every accepted line for post-shutdown assertions.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
 
 /// Extracts the `i` from a line ending in `seq=<i>`.
 fn seq_of(line: &str) -> Option<usize> {

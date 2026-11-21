@@ -4,24 +4,12 @@
 //! `REGISTRY` starts fresh and `configure!` succeeds exactly once -- every
 //! assertion runs under a single guard.
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
-use ticklog::{Level, LogSink, debug, error, info, trace, warn};
-
-/// A sink that records every accepted line, for assertions after shutdown.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> std::io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
+use common::CaptureSink;
+use ticklog::{Level, debug, error, info, trace, warn};
 
 #[test]
 fn macros_produce_formatted_lines_in_order() {

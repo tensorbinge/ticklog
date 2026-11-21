@@ -9,25 +9,13 @@
 //! A second case logs many arguments at once, guarding against any arity ceiling
 //! in the fix (the encoding must stay variadic).
 
+mod common;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ticklog::{Level, LogSink, info};
-
-/// A sink that records every accepted line, for assertions after shutdown.
-struct CaptureSink {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl LogSink for CaptureSink {
-    fn accept(&mut self, line: &[u8], _level: Level) -> std::io::Result<()> {
-        self.lines
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(line).into_owned());
-        Ok(())
-    }
-}
+use common::CaptureSink;
+use ticklog::{Level, info};
 
 #[test]
 fn each_argument_is_evaluated_once_and_arity_is_unbounded() {
