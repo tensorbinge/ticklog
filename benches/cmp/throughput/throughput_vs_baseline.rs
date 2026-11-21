@@ -3,18 +3,11 @@
 #[path = "../../common/workloads.rs"]
 mod workloads;
 
-use std::io;
+#[path = "../../common/sink.rs"]
+mod sink;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use ticklog::{Level, LogSink, info};
-
-struct NullSink;
-
-impl LogSink for NullSink {
-    fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
-        Ok(())
-    }
-}
+use ticklog::info;
 
 /// Approximate bytes for `x=42\n` in ticklog binary format.
 const ONE_U64_BYTES: u64 = 50;
@@ -40,12 +33,7 @@ fn bench_baseline_throughput(c: &mut Criterion) {
 // -- ticklog throughput -----------------------------------------------
 
 fn bench_ticklog_throughput(c: &mut Criterion) {
-    let guard = ticklog::configure! {
-        sink: NullSink,
-        max_level: Level::Trace,
-    }
-    .expect("ticklog build");
-    std::mem::forget(guard);
+    sink::init_ticklog(None);
 
     let mut g = c.benchmark_group("throughput_ticklog");
 

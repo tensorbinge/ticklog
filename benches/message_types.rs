@@ -1,26 +1,14 @@
 //! Encode cost per `Loggable` argument type: empty (fixed overhead),
 //! u64, f64, bool, &str, and a mixed multi-arg record.
 
-use std::io;
+#[path = "common/sink.rs"]
+mod sink;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use ticklog::{Level, LogSink, info};
-
-struct NullSink;
-
-impl LogSink for NullSink {
-    fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
-        Ok(())
-    }
-}
+use ticklog::info;
 
 fn bench_message_types(c: &mut Criterion) {
-    let guard = ticklog::configure! {
-        sink: NullSink,
-        max_level: Level::Trace,
-    }
-    .expect("ticklog build");
-    std::mem::forget(guard);
+    sink::init_ticklog(None);
 
     let mut g = c.benchmark_group("message_types");
 

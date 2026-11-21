@@ -1,18 +1,12 @@
 //! Floor baselines + ticklog multi-thread scaling.
 
-use std::io;
+#[path = "../../common/sink.rs"]
+mod sink;
+
 use std::sync::{Arc, Barrier};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use ticklog::{Level, LogSink, info};
-
-struct NullSink;
-
-impl LogSink for NullSink {
-    fn accept(&mut self, _line: &[u8], _level: Level) -> io::Result<()> {
-        Ok(())
-    }
-}
+use ticklog::info;
 
 const RECORDS_PER_THREAD: u64 = 1_000;
 
@@ -70,12 +64,7 @@ fn bench_baseline_scaling(c: &mut Criterion) {
 // -- ticklog scaling --------------------------------------------------
 
 fn bench_ticklog_scaling(c: &mut Criterion) {
-    let guard = ticklog::configure! {
-        sink: NullSink,
-        max_level: Level::Trace,
-    }
-    .expect("ticklog build");
-    std::mem::forget(guard);
+    sink::init_ticklog(None);
 
     let mut g = c.benchmark_group("scaling_ticklog");
 
